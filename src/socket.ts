@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client'
 import type { ConversationSummary, Message, MessageStatus, User } from './types'
+import { apiUrl } from './api'
 
 type Ack<T> = T & { error?: string }
 
@@ -32,6 +33,10 @@ export type ClientToServer = {
       mime: string
       fileName: string
     },
+    callback: (res: Ack<{ message: Message }>) => void,
+  ) => void
+  'message:sticker': (
+    payload: { conversationId: string; sticker: string },
     callback: (res: Ack<{ message: Message }>) => void,
   ) => void
   'conversation:delete': (
@@ -68,7 +73,7 @@ export type ServerToClient = {
 export type AppSocket = Socket<ServerToClient, ClientToServer>
 
 export function createSocket(): AppSocket {
-  return io('http://localhost:3001', {
+  return io(apiUrl(''), {
     autoConnect: false,
     transports: ['websocket', 'polling'],
   })

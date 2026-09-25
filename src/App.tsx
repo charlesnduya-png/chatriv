@@ -225,6 +225,18 @@ export default function App() {
     })
   }
 
+  function sendSticker(sticker: string) {
+    const socket = socketRef.current
+    if (!socket || !activeId) return
+    socket.emit(
+      'message:sticker',
+      { conversationId: activeId, sticker },
+      (res) => {
+        if (res.error) setError(res.error)
+      },
+    )
+  }
+
   function reactToMessage(messageId: string, emoji: string) {
     const socket = socketRef.current
     if (!socket || !activeId) return
@@ -299,6 +311,7 @@ export default function App() {
       onOpenConversation={openConversation}
       onSendMessage={sendMessage}
       onSendPhoto={sendPhoto}
+      onSendSticker={sendSticker}
       onReact={reactToMessage}
       onDeleteConversation={deleteConversation}
     />

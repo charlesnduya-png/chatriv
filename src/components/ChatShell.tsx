@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConversationSummary, Message, User } from '../types'
-import { REACTION_EMOJIS } from '../types'
+import { REACTION_EMOJIS, STICKERS } from '../types'
+import { apiUrl } from '../api'
 import { Logo } from './Logo'
 
 type ChatShellProps = {
@@ -19,6 +20,7 @@ type ChatShellProps = {
   onOpenConversation: (conversationId: string) => void
   onSendMessage: (text: string) => void
   onSendPhoto: (file: File) => void
+  onSendSticker: (sticker: string) => void
   onReact: (messageId: string, emoji: string) => void
   onDeleteConversation: (conversationId: string) => void
 }
@@ -121,7 +123,7 @@ function MessageBubble({
       className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${reactionGroups.length ? ' has-reactions' : ''}`}
     >
       <article
-        className={`bubble${mine ? ' bubble--mine' : ''}${message.type === 'photo' ? ' bubble--photo' : ''}${pickerOpen ? ' is-picking' : ''}`}
+        className={`bubble${mine ? ' bubble--mine' : ''}${message.type === 'photo' ? ' bubble--photo' : ''}${message.type === 'sticker' ? ' bubble--sticker' : ''}${pickerOpen ? ' is-picking' : ''}`}
         onClick={handleDoubleTap}
         onContextMenu={(event) => {
           event.preventDefault()
@@ -130,6 +132,10 @@ function MessageBubble({
       >
         {message.type === 'photo' ? (
           <PhotoMessage message={message} mine={mine} />
+        ) : message.type === 'sticker' ? (
+          <p className="bubble__sticker" aria-label="Sticker">
+            {message.sticker}
+          </p>
         ) : (
           <p className="bubble__text">{message.text}</p>
         )}
@@ -219,7 +225,7 @@ function PhotoMessage({
     )
   }
 
-  const src = `/api/photos/${message.photoId}`
+  const src = apiUrl(`/api/photos/${message.photoId}`)
 
   async function savePhoto() {
     try {
@@ -272,11 +278,13 @@ export function ChatShell({
   onOpenConversation,
   onSendMessage,
   onSendPhoto,
+  onSendSticker,
   onReact,
   onDeleteConversation,
 }: ChatShellProps) {
   const [draft, setDraft] = useState('')
   const [nameDraft, setNameDraft] = useState(searchQuery)
+  const [stickerOpen, setStickerOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -286,6 +294,7 @@ export function ChatShell({
 
   useEffect(() => {
     setDraft('')
+    setStickerOpen(false)
   }, [active?.id])
 
   useEffect(() => {
@@ -301,10 +310,9 @@ export function ChatShell({
         </header>
 
         <section className="sidebar__section">
-          <h2 className="sidebar__heading">Find someone</h2>
+          <h2 className="sidebar__heading">Directory</h2>
           <p className="sidebar__empty">
-            People stay hidden while online. Try searching <strong>dolly</strong> —
-            she’s always available for demos.
+            Find people by searching their username.
           </p>
           <form
             className="search"
@@ -317,7 +325,7 @@ export function ChatShell({
               className="search__input"
               value={nameDraft}
               onChange={(event) => setNameDraft(event.target.value)}
-              placeholder="Type a name"
+              placeholder="Find someone"
               maxLength={32}
               autoComplete="off"
             />
@@ -385,10 +393,10 @@ export function ChatShell({
         {!active ? (
           <div className="stage__empty">
             <Logo size="lg" />
-            <h1>Search a name to start talking.</h1>
+            <h1>Find a contact to begin.</h1>
             <p>
-              Share photos that stay for 10 minutes — the receiver can Save before
-              they disappear.
+              Search an exact display name to open a conversation. Shared photos
+              remain available for ten minutes before they expire.
             </p>
           </div>
         ) : (
@@ -438,6 +446,36 @@ export function ChatShell({
 
             {error ? <p className="stage__error">{error}</p> : null}
 
+            {stickerOpen ? (
+              <div className="sticker-panel" role="dialog" aria-label="Stickers">
+                <div className="sticker-panel__head">
+                  <p className="sticker-panel__title">Stickers</p>
+                  <button
+                    type="button"
+                    className="sticker-panel__close"
+                    onClick={() => setStickerOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="sticker-panel__grid">
+                  {STICKERS.map((sticker) => (
+                    <button
+                      key={sticker}
+                      type="button"
+                      className="sticker-panel__item"
+                      onClick={() => {
+                        onSendSticker(sticker)
+                        setStickerOpen(false)
+                      }}
+                    >
+                      {sticker}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <form
               className="composer"
               onSubmit={(event) => {
@@ -466,6 +504,14 @@ export function ChatShell({
                 onClick={() => fileRef.current?.click()}
               >
                 {sendingPhoto ? 'Sending…' : 'Photo'}
+              </button>
+              <button
+                type="button"
+                className={`composer__sticker${stickerOpen ? ' is-open' : ''}`}
+                onClick={() => setStickerOpen((open) => !open)}
+                aria-label="Open stickers"
+              >
+                😊
               </button>
               <input
                 className="composer__input"

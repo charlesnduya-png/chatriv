@@ -17,6 +17,14 @@ const ALLOWED_PHOTO_TYPES = new Set([
   'image/webp',
   'image/gif',
 ])
+const ALLOWED_STICKERS = new Set([
+  '😀', '😁', '😂', '🤣', '😊', '😍', '🤩', '😎',
+  '🥳', '😇', '🤗', '🤔', '😴', '😭', '😤', '🤯',
+  '🥰', '😘', '😏', '🙄', '😳', '🫠', '🫡', '😈',
+  '👍', '👎', '👏', '🙌', '🙏', '💪', '✌️', '🤝',
+  '❤️', '🔥', '⭐', '✨', '🎉', '💯', '✅', '🚀',
+  '🐱', '🐶', '🐼', '🦊', '🐸', '🦄', '🐝', '🌸',
+])
 
 /** @typedef {{ id: string, name: string, socketId: string | null, isDemo?: boolean }} User */
 /** @typedef {{
@@ -25,7 +33,8 @@ const ALLOWED_PHOTO_TYPES = new Set([
  *  senderId: string,
  *  text: string,
  *  createdAt: number,
- *  type?: 'text' | 'photo',
+ *  type?: 'text' | 'photo' | 'sticker',
+ *  sticker?: string,
  *  photoId?: string,
  *  fileName?: string,
  *  mime?: string,
@@ -60,8 +69,22 @@ usersById.set(demoUser.id, demoUser)
 
 const app = express()
 const httpServer = createServer(app)
+
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]
+const envOrigins = String(process.env.CLIENT_URLS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])]
+
 const io = new Server(httpServer, {
-  cors: { origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] },
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+  },
   maxHttpBufferSize: 5 * 1024 * 1024,
 })
 
@@ -92,40 +115,47 @@ function publicUser(user) {
 function publicMessage(message) {
   const status = message.status || 'sent'
   const reactions = message.reactions || {}
-
-  if (message.type !== 'photo') {
-    return {
-      id: message.id,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      text: message.text,
-      createdAt: message.createdAt,
-      type: 'text',
-      status,
-      reactions,
-    }
-  }
-
-  const expired =
-    Boolean(message.expired) ||
-    !message.photoId ||
-    !photos.has(message.photoId) ||
-    Date.now() >= (message.expiresAt || 0)
-
-  return {
+  const base = {
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
-    text: expired ? 'Photo disappeared' : 'Photo',
     createdAt: message.createdAt,
-    type: 'photo',
-    photoId: expired ? undefined : message.photoId,
-    fileName: message.fileName,
-    mime: message.mime,
-    expiresAt: message.expiresAt,
-    expired,
     status,
     reactions,
+  }
+
+  if (message.type === 'sticker') {
+    return {
+      ...base,
+      type: 'sticker',
+      text: 'Sticker',
+      sticker: message.sticker,
+    }
+  }
+
+  if (message.type === 'photo') {
+    const expired =
+      Boolean(message.expired) ||
+      !message.photoId ||
+      !photos.has(message.photoId) ||
+      Date.now() >= (message.expiresAt || 0)
+
+    return {
+      ...base,
+      text: expired ? 'Photo disappeared' : 'Photo',
+      type: 'photo',
+      photoId: expired ? undefined : message.photoId,
+      fileName: message.fileName,
+      mime: message.mime,
+      expiresAt: message.expiresAt,
+      expired,
+    }
+  }
+
+  return {
+    ...base,
+    text: message.text,
+    type: 'text',
   }
 }
 
@@ -175,6 +205,7 @@ function previewText(message) {
   if (message.type === 'photo') {
     return message.expired ? 'Photo disappeared' : 'Photo'
   }
+  if (message.type === 'sticker') return 'Sticker'
   return message.text
 }
 
@@ -311,6 +342,9 @@ function demoReply(text) {
   const lower = text.toLowerCase()
   if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
     return 'Hey! I’m Dolly, the demo account. Ask me anything about the chat.'
+  }
+  if (lower.includes('sticker')) {
+    return 'Love stickers! Tap the sticker button next to Photo to send one.'
   }
   if (lower.includes('photo') || lower.includes('picture') || lower.includes('image')) {
     return 'Nice! Photos stay for 10 minutes — the other person can Save before they disappear.'
@@ -531,6 +565,37 @@ io.on('connection', (socket) => {
     maybeDemoReply(conversation, me, trimmed)
   })
 
+  socket.on('message:sticker', ({ conversationId, sticker }, callback) => {
+    const me = usersBySocket.get(socket.id)
+    const conversation = conversations.get(conversationId)
+    const pick = String(sticker || '')
+
+    if (!me || !conversation || !conversation.participants.includes(me.id)) {
+      callback?.({ error: 'Conversation not found' })
+      return
+    }
+    if (!ALLOWED_STICKERS.has(pick)) {
+      callback?.({ error: 'Sticker not available' })
+      return
+    }
+
+    const message = {
+      id: randomUUID(),
+      conversationId,
+      senderId: me.id,
+      text: 'Sticker',
+      sticker: pick,
+      createdAt: Date.now(),
+      type: 'sticker',
+      status: 'sent',
+      reactions: {},
+    }
+
+    publishMessage(conversation, message)
+    callback?.({ message: publicMessage(message) })
+    maybeDemoReply(conversation, me, 'sticker')
+  })
+
   socket.on('message:react', ({ conversationId, messageId, emoji }, callback) => {
     const me = usersBySocket.get(socket.id)
     const conversation = conversations.get(conversationId)
@@ -726,7 +791,7 @@ if (existsSync(distPath)) {
   })
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`chatriv server on http://localhost:${PORT}`)
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`chatriv server on http://0.0.0.0:${PORT}`)
   console.log(`demo account online: search “${DEMO_NAME}”`)
 })

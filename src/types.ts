@@ -11,7 +11,8 @@ export type Message = {
   senderId: string
   text: string
   createdAt: number
-  type?: 'text' | 'photo'
+  type?: 'text' | 'photo' | 'sticker'
+  sticker?: string
   photoId?: string
   fileName?: string
   mime?: string
@@ -34,3 +35,12 @@ export type ConversationSummary = {
 }
 
 export const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'] as const
+
+export const STICKERS = [
+  '😀', '😁', '😂', '🤣', '😊', '😍', '🤩', '😎',
+  '🥳', '😇', '🤗', '🤔', '😴', '😭', '😤', '🤯',
+  '🥰', '😘', '😏', '🙄', '😳', '🫠', '🫡', '😈',
+  '👍', '👎', '👏', '🙌', '🙏', '💪', '✌️', '🤝',
+  '❤️', '🔥', '⭐', '✨', '🎉', '💯', '✅', '🚀',
+  '🐱', '🐶', '🐼', '🦊', '🐸', '🦄', '🐝', '🌸',
+] as const
