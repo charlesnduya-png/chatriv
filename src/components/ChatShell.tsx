@@ -3,6 +3,7 @@ import type { ConversationSummary, Message, User } from '../types'
 import { REACTION_EMOJIS, STICKERS } from '../types'
 import { apiUrl } from '../api'
 import { Logo } from './Logo'
+import { InstallPrompt } from './InstallPrompt'
 
 type ChatShellProps = {
   me: User
@@ -15,6 +16,7 @@ type ChatShellProps = {
   searchResults: User[]
   searching: boolean
   searchHint: string | null
+  callBusy: boolean
   onSearch: (name: string) => void
   onStartChat: (otherUserId: string) => void
   onOpenConversation: (conversationId: string) => void
@@ -23,6 +25,9 @@ type ChatShellProps = {
   onSendSticker: (sticker: string) => void
   onReact: (messageId: string, emoji: string) => void
   onDeleteConversation: (conversationId: string) => void
+  onSignOut: () => void
+  onVoiceCall: () => void
+  onVideoCall: () => void
 }
 
 function formatTime(ts: number) {
@@ -30,6 +35,71 @@ function formatTime(ts: number) {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+function formatThreadTime(ts: number) {
+  const date = new Date(ts)
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) return formatTime(ts)
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  if (isYesterday) return 'Yesterday'
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function formatDayLabel(ts: number) {
+  const date = new Date(ts)
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  if (isYesterday) return 'Yesterday'
+  return date.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function sameCalendarDay(a: number, b: number) {
+  const left = new Date(a)
+  const right = new Date(b)
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
+}
+
+function previewText(conversation: ConversationSummary, meId: string) {
+  const last = conversation.lastMessage
+  if (!last) return 'Say hello'
+  const mine = last.senderId === meId
+  const prefix = mine ? 'You: ' : ''
+  return `${prefix}${last.text}`
 }
 
 function formatRemaining(ms: number) {
@@ -94,11 +164,15 @@ function MessageBubble({
   message,
   mine,
   meId,
+  clustered,
+  showMeta,
   onReact,
 }: {
   message: Message
   mine: boolean
   meId: string
+  clustered: boolean
+  showMeta: boolean
   onReact: (messageId: string, emoji: string) => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -120,10 +194,10 @@ function MessageBubble({
 
   return (
     <div
-      className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${reactionGroups.length ? ' has-reactions' : ''}`}
+      className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${clustered ? ' bubble-wrap--cluster' : ''}${reactionGroups.length ? ' has-reactions' : ''}`}
     >
       <article
-        className={`bubble${mine ? ' bubble--mine' : ''}${message.type === 'photo' ? ' bubble--photo' : ''}${message.type === 'sticker' ? ' bubble--sticker' : ''}${pickerOpen ? ' is-picking' : ''}`}
+        className={`bubble${mine ? ' bubble--mine' : ''}${message.type === 'photo' ? ' bubble--photo' : ''}${message.type === 'sticker' ? ' bubble--sticker' : ''}${clustered ? ' bubble--cluster' : ''}${pickerOpen ? ' is-picking' : ''}`}
         onClick={handleDoubleTap}
         onContextMenu={(event) => {
           event.preventDefault()
@@ -139,12 +213,14 @@ function MessageBubble({
         ) : (
           <p className="bubble__text">{message.text}</p>
         )}
-        <div className="bubble__foot">
-          <time className="bubble__time" dateTime={new Date(message.createdAt).toISOString()}>
-            {formatTime(message.createdAt)}
-          </time>
-          {mine ? <MessageTicks status={message.status} /> : null}
-        </div>
+        {showMeta ? (
+          <div className="bubble__foot">
+            <time className="bubble__time" dateTime={new Date(message.createdAt).toISOString()}>
+              {formatTime(message.createdAt)}
+            </time>
+            {mine ? <MessageTicks status={message.status} /> : null}
+          </div>
+        ) : null}
 
         {pickerOpen ? (
           <div className={`react-picker${mine ? ' react-picker--mine' : ''}`} role="toolbar" aria-label="React">
@@ -273,6 +349,7 @@ export function ChatShell({
   searchResults,
   searching,
   searchHint,
+  callBusy,
   onSearch,
   onStartChat,
   onOpenConversation,
@@ -281,6 +358,9 @@ export function ChatShell({
   onSendSticker,
   onReact,
   onDeleteConversation,
+  onSignOut,
+  onVoiceCall,
+  onVideoCall,
 }: ChatShellProps) {
   const [draft, setDraft] = useState('')
   const [nameDraft, setNameDraft] = useState(searchQuery)
@@ -306,13 +386,24 @@ export function ChatShell({
       <aside className="sidebar">
         <header className="sidebar__brand">
           <Logo size="sm" />
-          <p className="sidebar__you">Signed in as {me.name}</p>
+          <div className="sidebar__you-row">
+            <p className="sidebar__you">Signed in as {me.name}</p>
+            <button
+              type="button"
+              className="sidebar__signout"
+              onClick={onSignOut}
+            >
+              Sign out
+            </button>
+          </div>
+          <InstallPrompt />
         </header>
 
         <section className="sidebar__section">
           <h2 className="sidebar__heading">Directory</h2>
           <p className="sidebar__empty">
-            Find people by searching their username.
+            Type an exact display name (or the start of it), then Search.
+            Demo: search <strong>dolly</strong>.
           </p>
           <form
             className="search"
@@ -363,6 +454,7 @@ export function ChatShell({
             <ul className="threads">
               {conversations.map((conversation) => {
                 const isActive = conversation.id === active?.id
+                const stamp = conversation.lastMessage?.createdAt ?? conversation.createdAt
                 return (
                   <li key={conversation.id}>
                     <button
@@ -370,15 +462,22 @@ export function ChatShell({
                       className={`threads__item${isActive ? ' is-active' : ''}`}
                       onClick={() => onOpenConversation(conversation.id)}
                     >
-                      <span className="threads__name">
-                        <span
-                          className={`threads__presence${conversation.otherOnline ? ' is-online' : ''}`}
-                          aria-hidden
-                        />
-                        {conversation.other.name}
+                      <span
+                        className={`threads__avatar${conversation.otherOnline ? ' is-online' : ''}`}
+                        aria-hidden
+                      >
+                        {initials(conversation.other.name)}
                       </span>
-                      <span className="threads__preview">
-                        {conversation.lastMessage?.text || 'Say hello'}
+                      <span className="threads__body">
+                        <span className="threads__top">
+                          <span className="threads__name">{conversation.other.name}</span>
+                          <time className="threads__time" dateTime={new Date(stamp).toISOString()}>
+                            {formatThreadTime(stamp)}
+                          </time>
+                        </span>
+                        <span className="threads__preview">
+                          {previewText(conversation, me.id)}
+                        </span>
                       </span>
                     </button>
                   </li>
@@ -402,42 +501,102 @@ export function ChatShell({
         ) : (
           <>
             <header className="stage__header">
-              <div>
-                <h1 className="stage__title">{active.other.name}</h1>
-                <p className={`stage__subtitle${active.otherOnline ? ' is-online' : ''}`}>
-                  {active.otherOnline ? (
-                    <>
-                      <span className="stage__online-dot" aria-hidden />
-                      Online
-                    </>
-                  ) : (
-                    'Offline'
-                  )}
-                </p>
+              <div className="stage__identity">
+                <span
+                  className={`stage__avatar${active.otherOnline ? ' is-online' : ''}`}
+                  aria-hidden
+                >
+                  {initials(active.other.name)}
+                </span>
+                <div>
+                  <h1 className="stage__title">{active.other.name}</h1>
+                  <p className={`stage__subtitle${active.otherOnline ? ' is-online' : ''}`}>
+                    {active.otherOnline ? (
+                      <>
+                        <span className="stage__online-dot" aria-hidden />
+                        Online
+                      </>
+                    ) : (
+                      'Offline'
+                    )}
+                  </p>
+                </div>
               </div>
-              <button
-                type="button"
-                className="stage__delete"
-                onClick={() => onDeleteConversation(active.id)}
-              >
-                Delete conversation
-              </button>
+              <div className="stage__actions">
+                <button
+                  type="button"
+                  className="stage__call"
+                  onClick={onVoiceCall}
+                  disabled={!active.otherOnline || callBusy}
+                  title={
+                    active.otherOnline
+                      ? 'Voice call'
+                      : `${active.other.name} is offline`
+                  }
+                >
+                  Call
+                </button>
+                <button
+                  type="button"
+                  className="stage__call stage__call--video"
+                  onClick={onVideoCall}
+                  disabled={!active.otherOnline || callBusy}
+                  title={
+                    active.otherOnline
+                      ? 'Video call'
+                      : `${active.other.name} is offline`
+                  }
+                >
+                  Video
+                </button>
+                <button
+                  type="button"
+                  className="stage__delete"
+                  onClick={() => onDeleteConversation(active.id)}
+                >
+                  Delete
+                </button>
+              </div>
             </header>
 
             <div className="messages" role="log" aria-live="polite">
               {messages.length === 0 ? (
                 <p className="messages__empty">No messages yet. Start the thread.</p>
               ) : (
-                messages.map((message) => {
+                messages.map((message, index) => {
                   const mine = message.senderId === me.id
+                  const previous = messages[index - 1]
+                  const next = messages[index + 1]
+                  const showDay =
+                    !previous || !sameCalendarDay(previous.createdAt, message.createdAt)
+                  const clustered = Boolean(
+                    previous &&
+                      previous.senderId === message.senderId &&
+                      sameCalendarDay(previous.createdAt, message.createdAt) &&
+                      message.createdAt - previous.createdAt < 5 * 60 * 1000,
+                  )
+                  const showMeta = !(
+                    next &&
+                    next.senderId === message.senderId &&
+                    sameCalendarDay(next.createdAt, message.createdAt) &&
+                    next.createdAt - message.createdAt < 5 * 60 * 1000
+                  )
                   return (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
-                      mine={mine}
-                      meId={me.id}
-                      onReact={onReact}
-                    />
+                    <div key={message.id} className="messages__row">
+                      {showDay ? (
+                        <div className="messages__day" role="separator">
+                          <span>{formatDayLabel(message.createdAt)}</span>
+                        </div>
+                      ) : null}
+                      <MessageBubble
+                        message={message}
+                        mine={mine}
+                        meId={me.id}
+                        clustered={clustered}
+                        showMeta={showMeta}
+                        onReact={onReact}
+                      />
+                    </div>
                   )
                 })
               )}

@@ -1,5 +1,13 @@
 import { io, Socket } from 'socket.io-client'
-import type { ConversationSummary, Message, MessageStatus, User } from './types'
+import type {
+  CallMode,
+  CallReason,
+  CallSignal,
+  ConversationSummary,
+  Message,
+  MessageStatus,
+  User,
+} from './types'
 import { apiUrl } from './api'
 
 type Ack<T> = T & { error?: string }
@@ -47,6 +55,35 @@ export type ClientToServer = {
     payload: { conversationId: string; messageId: string; emoji: string },
     callback: (res: Ack<{ reactions: Record<string, string> }>) => void,
   ) => void
+  'call:invite': (
+    payload: { conversationId: string; mode: CallMode },
+    callback: (
+      res: Ack<{
+        callId: string
+        conversationId: string
+        mode: CallMode
+        to: User
+      }>,
+    ) => void,
+  ) => void
+  'call:accept': (
+    payload: { callId: string },
+    callback: (
+      res: Ack<{ callId: string; conversationId: string; mode: CallMode }>,
+    ) => void,
+  ) => void
+  'call:reject': (
+    payload: { callId: string },
+    callback: (res: Ack<{ ok: boolean }>) => void,
+  ) => void
+  'call:end': (
+    payload: { callId: string },
+    callback: (res: Ack<{ ok: boolean }>) => void,
+  ) => void
+  'call:signal': (
+    payload: { callId: string; signal: CallSignal },
+    callback: (res: Ack<{ ok: boolean }>) => void,
+  ) => void
 }
 
 export type ServerToClient = {
@@ -67,6 +104,28 @@ export type ServerToClient = {
     userId: string
     online: boolean
     conversationId: string
+  }) => void
+  'call:incoming': (payload: {
+    callId: string
+    conversationId: string
+    mode: CallMode
+    from: User
+  }) => void
+  'call:accepted': (payload: {
+    callId: string
+    conversationId: string
+    mode: CallMode
+    from: User
+  }) => void
+  'call:ended': (payload: {
+    callId: string
+    conversationId: string
+    reason: CallReason
+  }) => void
+  'call:signal': (payload: {
+    callId: string
+    fromUserId: string
+    signal: CallSignal
   }) => void
 }
 

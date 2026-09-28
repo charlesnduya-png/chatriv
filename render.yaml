@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: chatriv-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_URLS
+        value: https://chatriv-nine.vercel.app,https://chatriv.vercel.app,https://chatriv.com,https://www.chatriv.com,https://chatriv-ai-tech8.vercel.app

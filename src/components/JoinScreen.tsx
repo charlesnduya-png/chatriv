@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Logo } from './Logo'
+import { InstallPrompt } from './InstallPrompt'
 
 type JoinScreenProps = {
   onJoin: (name: string) => void
@@ -94,9 +95,10 @@ export function JoinScreen({ onJoin, joining, error }: JoinScreenProps) {
           </div>
           {error ? <p className="join__error">{error}</p> : null}
           <button className="join__button" type="submit" disabled={joining}>
-            {joining ? 'Signing in…' : 'Continue'}
+            {joining ? 'Signing in…' : 'Enter Chatrive'}
           </button>
         </form>
+        <InstallPrompt />
       </main>
     </div>
   )

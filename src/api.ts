@@ -3,7 +3,7 @@ export function apiUrl(path: string) {
   const base =
     configured ||
     (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-      ? window.location.origin
+      ? 'https://chatriv.fly.dev'
       : 'http://localhost:3001')
   return `${base.replace(/\/$/, '')}${path}`
 }
