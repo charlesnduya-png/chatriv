@@ -399,11 +399,7 @@ export function ChatShell({
           <InstallPrompt />
         </header>
 
-        <section className="sidebar__section">
-          <h2 className="sidebar__heading">Chats</h2>
-          <p className="sidebar__empty">
-            Search a display name to start messaging. Demo: <strong>dolly</strong>.
-          </p>
+        <div className="sidebar__search-bar">
           <form
             className="search"
             onSubmit={(event) => {
@@ -415,76 +411,93 @@ export function ChatShell({
               className="search__input"
               value={nameDraft}
               onChange={(event) => setNameDraft(event.target.value)}
-              placeholder="Find someone"
+              placeholder="Search"
               maxLength={32}
               autoComplete="off"
             />
             <button className="search__button" type="submit" disabled={searching || !nameDraft.trim()}>
-              {searching ? '…' : 'Search'}
+              {searching ? '…' : 'Go'}
             </button>
           </form>
+          {searchHint ? <p className="sidebar__hint">{searchHint}</p> : null}
+        </div>
 
-          {searchHint ? <p className="sidebar__empty">{searchHint}</p> : null}
-
+        <div className="inbox" role="list">
           {searchResults.length > 0 ? (
-            <ul className="people">
-              {searchResults.map((user) => (
-                <li key={user.id}>
-                  <button
-                    type="button"
-                    className="people__item"
-                    onClick={() => onStartChat(user.id)}
-                  >
-                    <span className="people__dot" aria-hidden />
-                    <span>{user.name}</span>
-                    <span className="people__action">Message</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-
-        <section className="sidebar__section sidebar__section--grow">
-          <h2 className="sidebar__heading">Recent</h2>
-          {conversations.length === 0 ? (
-            <p className="sidebar__empty">No chats yet.</p>
-          ) : (
-            <ul className="threads">
-              {conversations.map((conversation) => {
-                const isActive = conversation.id === active?.id
-                const stamp = conversation.lastMessage?.createdAt ?? conversation.createdAt
-                return (
-                  <li key={conversation.id}>
+            <div className="inbox__block">
+              <h2 className="inbox__heading">People</h2>
+              <ul className="people">
+                {searchResults.map((user) => (
+                  <li key={user.id}>
                     <button
                       type="button"
-                      className={`threads__item${isActive ? ' is-active' : ''}`}
-                      onClick={() => onOpenConversation(conversation.id)}
+                      className="people__item"
+                      onClick={() => onStartChat(user.id)}
                     >
-                      <span
-                        className={`threads__avatar${conversation.otherOnline ? ' is-online' : ''}`}
-                        aria-hidden
-                      >
-                        {initials(conversation.other.name)}
+                      <span className="threads__avatar" aria-hidden>
+                        {initials(user.name)}
                       </span>
                       <span className="threads__body">
                         <span className="threads__top">
-                          <span className="threads__name">{conversation.other.name}</span>
-                          <time className="threads__time" dateTime={new Date(stamp).toISOString()}>
-                            {formatThreadTime(stamp)}
-                          </time>
+                          <span className="threads__name">{user.name}</span>
+                          <span className="people__action">Message</span>
                         </span>
-                        <span className="threads__preview">
-                          {previewText(conversation, me.id)}
-                        </span>
+                        <span className="threads__preview">Tap to start a chat</span>
                       </span>
                     </button>
                   </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="inbox__block inbox__block--grow">
+            <h2 className="inbox__heading">Messages</h2>
+            {conversations.length === 0 ? (
+              <p className="sidebar__empty">
+                No chats yet. Search a name to message someone. Demo: <strong>dolly</strong>.
+              </p>
+            ) : (
+              <ul className="threads">
+                {conversations.map((conversation) => {
+                  const isActive = conversation.id === active?.id
+                  const stamp =
+                    conversation.lastMessage?.createdAt ?? conversation.createdAt
+                  return (
+                    <li key={conversation.id}>
+                      <button
+                        type="button"
+                        className={`threads__item${isActive ? ' is-active' : ''}`}
+                        onClick={() => onOpenConversation(conversation.id)}
+                      >
+                        <span
+                          className={`threads__avatar${conversation.otherOnline ? ' is-online' : ''}`}
+                          aria-hidden
+                        >
+                          {initials(conversation.other.name)}
+                        </span>
+                        <span className="threads__body">
+                          <span className="threads__top">
+                            <span className="threads__name">{conversation.other.name}</span>
+                            <time
+                              className="threads__time"
+                              dateTime={new Date(stamp).toISOString()}
+                            >
+                              {formatThreadTime(stamp)}
+                            </time>
+                          </span>
+                          <span className="threads__preview">
+                            {previewText(conversation, me.id)}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
       </aside>
 
       <main className="stage">

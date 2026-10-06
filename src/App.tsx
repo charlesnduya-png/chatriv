@@ -440,7 +440,7 @@ export default function App() {
 
   function startVoiceOrVideo(mode: CallMode) {
     if (!active) return
-    call.startCall(active.id, mode, active.other)
+    void call.startCall(active.id, mode, active.other)
   }
 
   return (

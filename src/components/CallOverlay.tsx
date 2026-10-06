@@ -29,6 +29,22 @@ function initials(name: string) {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
+async function playMedia(
+  element: HTMLMediaElement | null,
+  stream: MediaStream | null,
+) {
+  if (!element) return
+  if (element.srcObject !== stream) {
+    element.srcObject = stream
+  }
+  if (!stream) return
+  try {
+    await element.play()
+  } catch {
+    // Autoplay may block until a tap; Accept/Call already counts as gesture.
+  }
+}
+
 export function CallOverlay({
   phase,
   mode,
@@ -61,19 +77,13 @@ export function CallOverlay({
   }, [phase])
 
   useEffect(() => {
-    if (localRef.current) {
-      localRef.current.srcObject = localStream
-    }
-  }, [localStream])
+    void playMedia(localRef.current, localStream)
+  }, [localStream, phase, mode])
 
   useEffect(() => {
-    if (remoteRef.current) {
-      remoteRef.current.srcObject = remoteStream
-    }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = remoteStream
-    }
-  }, [remoteStream])
+    void playMedia(remoteRef.current, remoteStream)
+    void playMedia(remoteAudioRef.current, remoteStream)
+  }, [remoteStream, phase, mode])
 
   const statusLabel =
     phase === 'outgoing'
@@ -84,16 +94,22 @@ export function CallOverlay({
           ? 'Video call'
           : 'Voice call'
 
+  const showVideoStage = mode === 'video' && (phase === 'connected' || phase === 'outgoing')
+
   return (
     <div className={`call-overlay call-overlay--${mode}${phase === 'connected' ? ' is-live' : ''}`}>
+      {/* Always mounted so remote audio can play for voice and video calls. */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="call-overlay__audio" />
+
       <div className="call-overlay__stage">
-        {mode === 'video' && phase === 'connected' ? (
+        {showVideoStage ? (
           <>
             <video
               ref={remoteRef}
               className="call-overlay__remote"
               autoPlay
               playsInline
+              muted
             />
             {!cameraOff && localStream ? (
               <video
@@ -114,9 +130,6 @@ export function CallOverlay({
             <span className="call-overlay__avatar" aria-hidden>
               {initials(peer.name)}
             </span>
-            {mode === 'audio' || phase !== 'connected' ? (
-              <audio ref={remoteAudioRef} autoPlay playsInline />
-            ) : null}
           </div>
         )}
 
@@ -159,7 +172,6 @@ export function CallOverlay({
                 className={`call-btn call-btn--camera${cameraOff ? ' is-active' : ''}`}
                 onClick={onToggleCamera}
                 aria-pressed={cameraOff}
-                disabled={phase !== 'connected'}
               >
                 {cameraOff ? 'Cam on' : 'Cam off'}
               </button>
