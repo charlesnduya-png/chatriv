@@ -28,3 +28,12 @@ dist-ssr
 .env.production
 .env.vercel.check
 
+# Android signing / release artifacts
+android/key.properties
+android/*.jks
+android/*.keystore
+*.jks
+*.keystore
+android/app/build/
+android/.gradle/
+

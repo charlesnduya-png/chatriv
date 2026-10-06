@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type TouchEvent as ReactTouchEvent } from 'react'
 import type { ConversationSummary, Message, User } from '../types'
 import { REACTION_EMOJIS, STICKERS } from '../types'
 import { apiUrl } from '../api'
@@ -100,7 +100,8 @@ function previewText(conversation: ConversationSummary, meId: string) {
   if (!last) return 'Say hello'
   const mine = last.senderId === meId
   const prefix = mine ? 'You: ' : ''
-  return `${prefix}${last.text}`
+  const text = last.text.replace(/\s+/g, ' ').trim()
+  return `${prefix}${text || 'Message'}`
 }
 
 function formatRemaining(ms: number) {
@@ -167,6 +168,11 @@ function replyLabel(message: Message, meId: string) {
   return mine ? 'You' : message.replyTo.senderName
 }
 
+const LONG_PRESS_MS = 480
+const SWIPE_REPLY_PX = 68
+const SWIPE_MAX_PX = 88
+const GESTURE_SLOP_PX = 12
+
 function MessageBubble({
   message,
   mine,
@@ -186,16 +192,68 @@ function MessageBubble({
   onReply: (message: Message) => void
   onJumpToReply: (messageId: string) => void
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [swipeX, setSwipeX] = useState(0)
   const lastTap = useRef(0)
+  const suppressClickUntil = useRef(0)
+  const gesture = useRef<{
+    x: number
+    y: number
+    longPressId: number | null
+    axis: 'none' | 'h' | 'v'
+    replied: boolean
+    pressed: boolean
+    dx: number
+  } | null>(null)
+
   const myReaction = message.reactions?.[meId]
   const reactionGroups = groupReactions(message.reactions).map((group) => ({
     ...group,
     mine: myReaction === group.emoji,
   }))
   const quotedFrom = replyLabel(message, meId)
+  const replyReady = swipeX >= SWIPE_REPLY_PX
+
+  useEffect(() => {
+    if (!pickerOpen) return
+
+    function onPointerDown(event: PointerEvent) {
+      if (!wrapRef.current?.contains(event.target as Node)) {
+        setPickerOpen(false)
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setPickerOpen(false)
+    }
+
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [pickerOpen])
+
+  function clearLongPress() {
+    const current = gesture.current
+    if (current?.longPressId != null) {
+      window.clearTimeout(current.longPressId)
+      current.longPressId = null
+    }
+  }
+
+  function openReactPicker() {
+    suppressClickUntil.current = Date.now() + 450
+    setPickerOpen(true)
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate(18)
+    }
+  }
 
   function handleDoubleTap() {
+    if (Date.now() < suppressClickUntil.current) return
     const now = Date.now()
     if (now - lastTap.current < 320) {
       onReact(message.id, '❤️')
@@ -204,17 +262,85 @@ function MessageBubble({
     lastTap.current = now
   }
 
+  function onTouchStart(event: ReactTouchEvent) {
+    const touch = event.changedTouches[0]
+    if (!touch) return
+    clearLongPress()
+    gesture.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      longPressId: window.setTimeout(() => {
+        if (!gesture.current || gesture.current.axis !== 'none') return
+        gesture.current.pressed = true
+        openReactPicker()
+      }, LONG_PRESS_MS),
+      axis: 'none',
+      replied: false,
+      pressed: false,
+      dx: 0,
+    }
+  }
+
+  function onTouchMove(event: ReactTouchEvent) {
+    const current = gesture.current
+    const touch = event.changedTouches[0]
+    if (!current || !touch) return
+
+    const dx = touch.clientX - current.x
+    const dy = touch.clientY - current.y
+
+    if (current.axis === 'none') {
+      if (Math.abs(dx) < GESTURE_SLOP_PX && Math.abs(dy) < GESTURE_SLOP_PX) return
+      current.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v'
+      clearLongPress()
+    }
+
+    if (current.axis !== 'h' || current.pressed) return
+
+    const next = Math.max(0, Math.min(SWIPE_MAX_PX, dx))
+    current.dx = next
+    setSwipeX(next)
+    if (next >= SWIPE_REPLY_PX && !current.replied) {
+      current.replied = true
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(12)
+      }
+    }
+  }
+
+  function onTouchEnd() {
+    const current = gesture.current
+    clearLongPress()
+    if (current?.axis === 'h' && current.dx >= SWIPE_REPLY_PX) {
+      suppressClickUntil.current = Date.now() + 450
+      onReply(message)
+      setPickerOpen(false)
+    }
+    setSwipeX(0)
+    gesture.current = null
+  }
+
   return (
     <div
+      ref={wrapRef}
       id={`msg-${message.id}`}
-      className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${clustered ? ' bubble-wrap--cluster' : ''}${reactionGroups.length ? ' has-reactions' : ''}`}
+      className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${clustered ? ' bubble-wrap--cluster' : ''}${reactionGroups.length ? ' has-reactions' : ''}${swipeX > 0 ? ' is-swiping' : ''}${replyReady ? ' is-reply-ready' : ''}`}
+      style={{ '--swipe-x': `${swipeX}px` } as CSSProperties}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
     >
+      <div className="bubble-wrap__reply-hint" aria-hidden>
+        <span>↩</span>
+      </div>
+
       <article
         className={`bubble${mine ? ' bubble--mine' : ''}${message.type === 'photo' ? ' bubble--photo' : ''}${message.type === 'sticker' ? ' bubble--sticker' : ''}${clustered ? ' bubble--cluster' : ''}${pickerOpen ? ' is-picking' : ''}`}
         onClick={handleDoubleTap}
         onContextMenu={(event) => {
           event.preventDefault()
-          setPickerOpen((open) => !open)
+          openReactPicker()
         }}
       >
         {message.replyTo ? (
@@ -254,6 +380,7 @@ function MessageBubble({
             className={`msg-actions${mine ? ' msg-actions--mine' : ''}`}
             role="toolbar"
             aria-label="Message actions"
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="react-picker" role="group" aria-label="React">
               {REACTION_EMOJIS.map((emoji) => (
