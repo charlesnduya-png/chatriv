@@ -95,9 +95,14 @@ export function JoinScreen({ onJoin, joining, error }: JoinScreenProps) {
           </div>
           {error ? <p className="join__error">{error}</p> : null}
           <button className="join__button" type="submit" disabled={joining}>
-            {joining ? 'Signing in…' : 'Enter Chatrive'}
+            {joining ? 'Signing in…' : 'Enter Chatriv'}
           </button>
         </form>
+        <p className="join__legal">
+          <a href="/privacy" target="_blank" rel="noreferrer">
+            Privacy Policy
+          </a>
+        </p>
         <InstallPrompt />
       </main>
     </div>

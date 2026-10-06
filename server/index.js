@@ -1062,6 +1062,9 @@ setInterval(() => {
 
 const distPath = join(__dirname, '..', 'dist')
 if (existsSync(distPath)) {
+  app.get(['/privacy', '/privacy.html'], (_req, res) => {
+    res.sendFile(join(distPath, 'privacy.html'))
+  })
   app.use(express.static(distPath))
   app.get('/{*path}', (_req, res) => {
     res.sendFile(join(distPath, 'index.html'))

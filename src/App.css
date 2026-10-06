@@ -330,6 +330,21 @@ button {
   font-size: 0.98rem;
 }
 
+.join__legal {
+  margin: 0.85rem 0 0;
+  font-size: 0.85rem;
+}
+
+.join__legal a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.join__legal a:hover {
+  color: var(--sky-hot);
+}
+
 .join__note {
   margin: 1.15rem 0 0;
   display: flex;
