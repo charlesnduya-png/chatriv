@@ -47,6 +47,13 @@ export type ConversationSummary = {
   } | null
 }
 
+export type OpenGroup = {
+  id: string
+  name: string
+  memberCount: number
+  createdAt: number
+}
+
 export type CallMode = 'audio' | 'video'
 
 export type CallSignal =

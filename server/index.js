@@ -123,8 +123,113 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 5 * 1024 * 1024,
 })
 
+app.use('/api', (req, res, next) => {
+  const origin = String(req.headers.origin || '')
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+  next()
+})
+
+app.use(express.json({ limit: '48kb' }))
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
+})
+
+app.post('/api/crypto/charge', async (req, res) => {
+  const apiKey = String(process.env.COINBASE_COMMERCE_API_KEY || '').trim()
+  if (!apiKey) {
+    res.status(503).json({
+      error: 'Crypto payments are not configured on this server yet.',
+    })
+    return
+  }
+
+  const amountRaw = req.body?.amount
+  const amountNumber = Number(amountRaw)
+  if (!Number.isFinite(amountNumber) || amountNumber < 1 || amountNumber > 10000) {
+    res.status(400).json({ error: 'Enter an amount between $1 and $10,000.' })
+    return
+  }
+
+  const amount = amountNumber.toFixed(2)
+  const note = String(req.body?.note || '')
+    .trim()
+    .slice(0, 120)
+  const fromName = String(req.body?.fromName || 'Chatriv user')
+    .trim()
+    .slice(0, 32)
+  const conversationId = String(req.body?.conversationId || '').slice(0, 64)
+
+  try {
+    const response = await fetch('https://api.commerce.coinbase.com/charges', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CC-Api-Key': apiKey,
+        'X-CC-Version': '2018-03-22',
+      },
+      body: JSON.stringify({
+        name: note || `Chatriv crypto from ${fromName}`,
+        description: note
+          ? `${fromName}: ${note}`
+          : `Crypto payment started in Chatriv by ${fromName}`,
+        pricing_type: 'fixed_price',
+        local_price: {
+          amount,
+          currency: 'USD',
+        },
+        redirect_url: 'https://chatriv.com/',
+        cancel_url: 'https://chatriv.com/',
+        metadata: {
+          source: 'chatriv-chicken',
+          fromName,
+          conversationId: conversationId || undefined,
+        },
+      }),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const message =
+        payload?.error?.message ||
+        payload?.error ||
+        `Coinbase Commerce error (${response.status})`
+      res.status(502).json({ error: String(message) })
+      return
+    }
+
+    const data = payload?.data || payload
+    const hostedUrl = data?.hosted_url
+    const code = data?.code
+    if (!hostedUrl) {
+      res.status(502).json({ error: 'Coinbase did not return a payment link.' })
+      return
+    }
+
+    res.json({
+      hostedUrl,
+      code,
+      amount,
+      currency: 'USD',
+      expiresAt: data?.expires_at || null,
+    })
+  } catch (error) {
+    res.status(502).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not reach Coinbase Commerce.',
+    })
+  }
 })
 
 app.get('/api/photos/:photoId', (req, res) => {
@@ -399,11 +504,13 @@ function purgeConversation(conversationId) {
       }
     }
   }
-  if (conversation?.kind === 'group' && conversation.name) {
+  const wasGroup = conversation?.kind === 'group'
+  if (wasGroup && conversation.name) {
     groupsByName.delete(conversation.name.toLowerCase())
   }
   conversations.delete(conversationId)
   messagesByConversation.delete(conversationId)
+  if (wasGroup) broadcastOpenGroups()
 }
 
 function cleanupOrphanConversations(userId) {
@@ -498,6 +605,22 @@ function listConversationsFor(userId) {
       const bTime = b.lastMessage?.createdAt ?? b.createdAt
       return bTime - aTime
     })
+}
+
+function listOpenGroups() {
+  return [...conversations.values()]
+    .filter((c) => c.kind === 'group' && c.name)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      memberCount: c.participants.length,
+      createdAt: c.createdAt,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt)
+}
+
+function broadcastOpenGroups() {
+  io.emit('groups:update', { groups: listOpenGroups() })
 }
 
 function findConversationBetween(a, b) {
@@ -753,8 +876,18 @@ io.on('connection', (socket) => {
     callback?.({
       user: publicUser(user),
       conversations: listConversationsFor(user.id),
+      openGroups: listOpenGroups(),
       idleTimeoutMs: IDLE_TTL_MS,
     })
+  })
+
+  socket.on('groups:list', (callback) => {
+    const me = usersBySocket.get(socket.id)
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+    callback?.({ groups: listOpenGroups() })
   })
 
   socket.on('users:search', ({ name }, callback) => {
@@ -875,6 +1008,7 @@ io.on('connection', (socket) => {
     groupsByName.set(key, conversation.id)
 
     const payload = conversationFor(me.id, conversation)
+    broadcastOpenGroups()
     callback?.({ conversation: payload })
   })
 
@@ -910,6 +1044,7 @@ io.on('connection', (socket) => {
           conversationFor(participantId, conversation),
         )
       }
+      broadcastOpenGroups()
     }
 
     callback?.({ conversation: conversationFor(me.id, conversation) })
@@ -1187,6 +1322,7 @@ io.on('connection', (socket) => {
             conversationFor(participantId, conversation),
           )
         }
+        broadcastOpenGroups()
       }
 
       callback?.({ ok: true })

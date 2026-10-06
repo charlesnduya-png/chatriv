@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { createSocket, type AppSocket } from './socket'
-import type { CallMode, ConversationSummary, Message, MessageStatus, User } from './types'
+import type {
+  CallMode,
+  ConversationSummary,
+  Message,
+  MessageStatus,
+  OpenGroup,
+  User,
+} from './types'
 import { isGroup } from './types'
 import { JoinScreen } from './components/JoinScreen'
 import { ChatShell } from './components/ChatShell'
@@ -89,6 +96,7 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHint, setSearchHint] = useState<string | null>(null)
+  const [openGroups, setOpenGroups] = useState<OpenGroup[]>([])
   const [socketReady, setSocketReady] = useState<AppSocket | null>(null)
 
   const call = useCall({
@@ -113,6 +121,7 @@ export default function App() {
     setSearchResults([])
     setSearchQuery('')
     setSearchHint(null)
+    setOpenGroups([])
     setJoining(false)
     setSendingPhoto(false)
   }
@@ -145,10 +154,15 @@ export default function App() {
         }
         setMe(res.user)
         setConversations(res.conversations)
+        setOpenGroups(res.openGroups || [])
       })
     }
 
     socket.on('connect', rejoinIfNeeded)
+
+    socket.on('groups:update', ({ groups }) => {
+      setOpenGroups(groups)
+    })
 
     socket.on('conversation:upsert', (conversation) => {
       setConversations((prev) => upsertConversation(prev, conversation))
@@ -224,6 +238,7 @@ export default function App() {
 
     return () => {
       socket.off('connect', rejoinIfNeeded)
+      socket.off('groups:update')
       socket.off('session:expired')
       socket.disconnect()
       socketRef.current = null
@@ -283,6 +298,7 @@ export default function App() {
         }
         setMe(res.user)
         setConversations(res.conversations)
+        setOpenGroups(res.openGroups || [])
         sessionStorage.setItem('chatriv:name', trimmed)
       })
     }
@@ -382,6 +398,9 @@ export default function App() {
         return
       }
       setConversations((prev) => upsertConversation(prev, res.conversation))
+      socket.emit('groups:list', (listRes) => {
+        if (!listRes.error) setOpenGroups(listRes.groups)
+      })
       openConversation(res.conversation.id)
     })
   }
@@ -391,7 +410,7 @@ export default function App() {
     if (!socket) return
     const trimmed = name.trim()
     if (!trimmed) {
-      setError('Enter the exact group name to join.')
+      setError('Enter a group name to join.')
       return
     }
     setError(null)
@@ -401,6 +420,9 @@ export default function App() {
         return
       }
       setConversations((prev) => upsertConversation(prev, res.conversation))
+      socket.emit('groups:list', (listRes) => {
+        if (!listRes.error) setOpenGroups(listRes.groups)
+      })
       openConversation(res.conversation.id)
     })
   }
@@ -549,6 +571,7 @@ export default function App() {
         searchResults={searchResults}
         searching={searching}
         searchHint={searchHint}
+        openGroups={openGroups}
         onSearch={searchUsers}
         onStartChat={startChat}
         onCreateGroup={createGroup}

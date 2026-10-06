@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type TouchEvent as ReactTouchEvent } from 'react'
-import type { ConversationSummary, Message, User } from '../types'
+import type { ConversationSummary, Message, OpenGroup, User } from '../types'
 import {
   REACTION_EMOJIS,
   STICKERS,
@@ -9,6 +9,7 @@ import {
 import { apiUrl } from '../api'
 import { Logo } from './Logo'
 import { InstallPrompt } from './InstallPrompt'
+import { CryptoChicken } from './CryptoChicken'
 import { useScreenGuard } from '../useScreenGuard'
 
 type ChatShellProps = {
@@ -22,6 +23,7 @@ type ChatShellProps = {
   searchResults: User[]
   searching: boolean
   searchHint: string | null
+  openGroups: OpenGroup[]
   onSearch: (name: string) => void
   onStartChat: (otherUserId: string) => void
   onCreateGroup: (name: string) => void
@@ -513,6 +515,7 @@ export function ChatShell({
   searchResults,
   searching,
   searchHint,
+  openGroups,
   onSearch,
   onStartChat,
   onCreateGroup,
@@ -618,51 +621,103 @@ export function ChatShell({
           </form>
           {searchHint ? <p className="sidebar__hint">{searchHint}</p> : null}
 
-          <form
-            className="group-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-            }}
-          >
-            <input
-              className="search__input"
-              value={groupDraft}
-              onChange={(event) => setGroupDraft(event.target.value)}
-              placeholder="Group name"
-              maxLength={32}
-              autoComplete="off"
-            />
-            <div className="group-form__actions">
-              <button
-                type="button"
-                className="group-form__btn"
-                disabled={!groupDraft.trim()}
-                onClick={() => {
-                  onCreateGroup(groupDraft)
-                  setGroupDraft('')
-                }}
-              >
-                Create
-              </button>
-              <button
-                type="button"
-                className="group-form__btn group-form__btn--join"
-                disabled={!groupDraft.trim()}
-                onClick={() => {
-                  onJoinGroup(groupDraft)
-                  setGroupDraft('')
-                }}
-              >
-                Join
-              </button>
-            </div>
-          </form>
-          <p className="sidebar__hint">
-            Groups: join with the exact name. Chats disappear after 5 minutes.
-          </p>
+          <section className="group-panel" aria-label="Create a group">
+            <h2 className="group-panel__title">Create a group</h2>
+            <p className="group-panel__copy">
+              Name it, share the name, or let others tap Join from Open groups.
+              Messages vanish after 5 minutes.
+            </p>
+            <form
+              className="group-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (!groupDraft.trim()) return
+                onCreateGroup(groupDraft)
+                setGroupDraft('')
+              }}
+            >
+              <input
+                className="search__input"
+                value={groupDraft}
+                onChange={(event) => setGroupDraft(event.target.value)}
+                placeholder="New group name"
+                maxLength={32}
+                autoComplete="off"
+              />
+              <div className="group-form__actions">
+                <button
+                  type="submit"
+                  className="group-form__btn"
+                  disabled={!groupDraft.trim()}
+                >
+                  Create group
+                </button>
+                <button
+                  type="button"
+                  className="group-form__btn group-form__btn--join"
+                  disabled={!groupDraft.trim()}
+                  onClick={() => {
+                    onJoinGroup(groupDraft)
+                    setGroupDraft('')
+                  }}
+                >
+                  Join by name
+                </button>
+              </div>
+            </form>
+          </section>
         </div>
 
         <div className="inbox" role="list">
+          <div className="inbox__block">
+            <h2 className="inbox__heading">Open groups</h2>
+            {openGroups.length === 0 ? (
+              <p className="sidebar__empty">
+                No open groups yet. Create one above so people can find and join
+                it.
+              </p>
+            ) : (
+              <ul className="people">
+                {openGroups.map((group) => {
+                  const alreadyIn = conversations.some(
+                    (conversation) =>
+                      conversation.kind === 'group' &&
+                      conversation.id === group.id,
+                  )
+                  return (
+                    <li key={group.id}>
+                      <button
+                        type="button"
+                        className="people__item"
+                        onClick={() => {
+                          if (alreadyIn) onOpenConversation(group.id)
+                          else onJoinGroup(group.name)
+                        }}
+                      >
+                        <span className="threads__avatar is-group" aria-hidden>
+                          #
+                        </span>
+                        <span className="threads__body">
+                          <span className="threads__top">
+                            <span className="threads__name">{group.name}</span>
+                            <span className="people__action">
+                              {alreadyIn ? 'Open' : 'Join'}
+                            </span>
+                          </span>
+                          <span className="threads__preview">
+                            {group.memberCount}{' '}
+                            {group.memberCount === 1 ? 'member' : 'members'} ·
+                            vanish in 5 min
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+
           {searchResults.length > 0 ? (
             <div className="inbox__block">
               <h2 className="inbox__heading">People</h2>
@@ -936,6 +991,13 @@ export function ChatShell({
                 </button>
               </div>
             ) : null}
+
+            <CryptoChicken
+              fromName={me.name}
+              conversationId={active.id}
+              peerLabel={conversationTitle(active)}
+              onShareLink={(text) => onSendMessage(text)}
+            />
 
             <form
               className="composer"

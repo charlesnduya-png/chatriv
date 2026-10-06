@@ -5,6 +5,7 @@ import type {
   ConversationSummary,
   Message,
   MessageStatus,
+  OpenGroup,
   User,
 } from './types'
 import { apiUrl } from './api'
@@ -18,6 +19,7 @@ export type ClientToServer = {
       res: Ack<{
         user: User
         conversations: ConversationSummary[]
+        openGroups?: OpenGroup[]
         idleTimeoutMs?: number
       }>,
     ) => void,
@@ -25,6 +27,9 @@ export type ClientToServer = {
   'users:search': (
     payload: { name: string },
     callback: (res: Ack<{ users: User[] }>) => void,
+  ) => void
+  'groups:list': (
+    callback: (res: Ack<{ groups: OpenGroup[] }>) => void,
   ) => void
   'conversation:start': (
     payload: { otherUserId: string },
@@ -110,6 +115,7 @@ export type ClientToServer = {
 export type ServerToClient = {
   'conversation:upsert': (conversation: ConversationSummary) => void
   'conversation:deleted': (payload: { conversationId: string }) => void
+  'groups:update': (payload: { groups: OpenGroup[] }) => void
   'message:new': (message: Message) => void
   'message:expired': (payload: { conversationId: string; messageId: string }) => void
   'message:status': (payload: {

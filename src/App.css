@@ -716,10 +716,31 @@ button {
   line-height: 1.35;
 }
 
+.group-panel {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  background: rgba(0, 168, 132, 0.1);
+  border: 1px solid rgba(37, 211, 102, 0.28);
+}
+
+.group-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #e9edef;
+}
+
+.group-panel__copy {
+  margin: 0.35rem 0 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 .group-form {
   display: grid;
   gap: 0.45rem;
-  margin-top: 0.65rem;
 }
 
 .group-form__actions {
@@ -1591,6 +1612,88 @@ button {
 
 .ticks svg {
   display: block;
+}
+
+.crypto-chicken {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: #1a242b;
+  padding: 0.35rem 0.65rem;
+}
+
+.crypto-chicken__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(37, 211, 102, 0.35);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem 0.35rem 0.45rem;
+  background: rgba(0, 168, 132, 0.12);
+  color: #e9edef;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.crypto-chicken__emoji {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.crypto-chicken.is-open .crypto-chicken__toggle {
+  background: rgba(0, 168, 132, 0.22);
+  border-color: rgba(37, 211, 102, 0.55);
+}
+
+.crypto-chicken__panel {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.15rem 0.35rem;
+}
+
+.crypto-chicken__copy {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.crypto-chicken__field {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.crypto-chicken__input {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  background: #2a3942;
+  color: #e9edef;
+  font-size: 16px;
+}
+
+.crypto-chicken__error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #fda4af;
+}
+
+.crypto-chicken__pay {
+  border: 0;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  background: var(--sky);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.crypto-chicken__pay:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .composer {
