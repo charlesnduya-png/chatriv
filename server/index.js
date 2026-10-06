@@ -197,12 +197,20 @@ app.post('/api/crypto/charge', async (req, res) => {
       }),
     })
 
-    const payload = await response.json().catch(() => ({}))
+    const raw = await response.text()
+    let payload = {}
+    try {
+      payload = JSON.parse(raw)
+    } catch {
+      payload = {}
+    }
     if (!response.ok) {
       const message =
         payload?.error?.message ||
-        payload?.error ||
-        `Coinbase Commerce error (${response.status})`
+        (typeof payload?.error === 'string' ? payload.error : null) ||
+        (response.status === 503
+          ? 'Coinbase Commerce is unavailable right now. Confirm your Commerce API key in the Coinbase Commerce dashboard (Settings → Security), or use a Coinbase Business Checkout secret key.'
+          : `Coinbase Commerce error (${response.status})`)
       res.status(502).json({ error: String(message) })
       return
     }
