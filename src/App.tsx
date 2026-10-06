@@ -82,13 +82,31 @@ export default function App() {
     meRef.current = me
   }, [me])
 
-  const signOutRef = useRef<(message?: string) => void>(() => {})
+  const clearSessionRef = useRef<(message?: string) => void>(() => {})
+
+  clearSessionRef.current = (message?: string) => {
+    sessionStorage.removeItem('chatriv:name')
+    call.resetCall()
+    setMe(null)
+    setConversations([])
+    setActiveId(null)
+    setMessages([])
+    setError(message || null)
+    setSearchResults([])
+    setSearchQuery('')
+    setSearchHint(null)
+    setJoining(false)
+    setSendingPhoto(false)
+  }
 
   useIdleSignOut({
     enabled: Boolean(me),
     socket: socketReady,
     onIdle: () => {
-      signOutRef.current('Signed out after 10 minutes of inactivity.')
+      const socket = socketRef.current
+      if (socket?.connected) socket.disconnect()
+      clearSessionRef.current('Signed out after 10 minutes of inactivity.')
+      socket?.connect()
     },
   })
 
@@ -175,16 +193,16 @@ export default function App() {
       })
     })
 
-    const onSessionExpired = (payload: { message?: string }) => {
-      signOutRef.current(
+    socket.on('session:expired', (payload) => {
+      clearSessionRef.current(
         payload.message || 'Signed out after 10 minutes of inactivity.',
       )
-    }
-    socket.on('session:expired', onSessionExpired)
+      if (!socket.connected) socket.connect()
+    })
 
     return () => {
       socket.off('connect', rejoinIfNeeded)
-      socket.off('session:expired', onSessionExpired)
+      socket.off('session:expired')
       socket.disconnect()
       socketRef.current = null
       setSocketReady(null)
@@ -437,27 +455,12 @@ export default function App() {
     })
   }
 
-  function signOut(message?: string) {
-    sessionStorage.removeItem('chatriv:name')
-    call.resetCall()
+  function signOut() {
     const socket = socketRef.current
-    if (socket) {
-      socket.disconnect()
-      socket.connect()
-    }
-    setMe(null)
-    setConversations([])
-    setActiveId(null)
-    setMessages([])
-    setError(message || null)
-    setSearchResults([])
-    setSearchQuery('')
-    setSearchHint(null)
-    setJoining(false)
-    setSendingPhoto(false)
+    if (socket?.connected) socket.disconnect()
+    clearSessionRef.current()
+    socket?.connect()
   }
-
-  signOutRef.current = signOut
 
   if (!me) {
     return <JoinScreen onJoin={join} joining={joining} error={error} />

@@ -22,11 +22,6 @@ export type ClientToServer = {
       }>,
     ) => void,
   ) => void
-  'presence:ping': (
-    callback: (
-      res: Ack<{ ok: boolean; idleTimeoutMs?: number; remainingMs?: number }>,
-    ) => void,
-  ) => void
   'users:search': (
     payload: { name: string },
     callback: (res: Ack<{ users: User[] }>) => void,
@@ -101,6 +96,7 @@ export type ClientToServer = {
     payload: { callId: string; signal: CallSignal },
     callback: (res: Ack<{ ok: boolean }>) => void,
   ) => void
+  'presence:ping': (callback?: (res: Ack<{ ok: boolean }>) => void) => void
 }
 
 export type ServerToClient = {
@@ -135,7 +131,7 @@ export type ServerToClient = {
   }) => void
   'call:ended': (payload: { callId: string }) => void
   'call:signal': (payload: { callId: string; signal: CallSignal }) => void
-  'session:expired': (payload: { reason: string; message: string }) => void
+  'session:expired': (payload: { reason: string; message?: string }) => void
 }
 
 export type AppSocket = Socket<ServerToClient, ClientToServer>

@@ -10,9 +10,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
 const DEMO_NAME = 'dolly'
 const PHOTO_TTL_MS = 10 * 60 * 1000
-/** Sign out / drop dormant sessions after 10 minutes with no activity. */
 const IDLE_TTL_MS = 10 * 60 * 1000
-const IDLE_SWEEP_MS = 30 * 1000
+const IDLE_CHECK_MS = 30 * 1000
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024
 const ALLOWED_PHOTO_TYPES = new Set([
   'image/jpeg',
@@ -29,7 +28,7 @@ const ALLOWED_STICKERS = new Set([
   '🐱', '🐶', '🐼', '🦊', '🐸', '🦄', '🐝', '🌸',
 ])
 
-/** @typedef {{ id: string, name: string, socketId: string | null, isDemo?: boolean, lastActiveAt?: number }} User */
+/** @typedef {{ id: string, name: string, socketId: string | null, isDemo?: boolean }} User */
 /** @typedef {{
  *  id: string,
  *  conversationId: string,
@@ -77,85 +76,16 @@ const viewingConversation = new Map()
  * }} CallSession */
 /** @type {Map<string, CallSession>} */
 const activeCalls = new Map()
+/** @type {Map<string, number>} */
+const lastActivityByUser = new Map()
 
 const demoUser = {
   id: 'demo-dolly',
   name: DEMO_NAME,
   socketId: null,
   isDemo: true,
-  lastActiveAt: Date.now(),
 }
 usersById.set(demoUser.id, demoUser)
-
-function touchActivity(user) {
-  if (!user || user.isDemo) return
-  user.lastActiveAt = Date.now()
-}
-
-function removeUserSession(user, reason = 'disconnect') {
-  if (!user || user.isDemo) return
-  // Already removed (disconnect after idle kick).
-  if (!usersById.has(user.id)) return
-
-  for (const [callId, call] of [...activeCalls.entries()]) {
-    if (call.fromUserId !== user.id && call.toUserId !== user.id) continue
-    activeCalls.delete(callId)
-    const otherId =
-      call.fromUserId === user.id ? call.toUserId : call.fromUserId
-    io.to(`user:${otherId}`).emit('call:ended', { callId })
-  }
-
-  const socketId = user.socketId
-  usersById.delete(user.id)
-  viewingConversation.delete(user.id)
-  if (socketId) usersBySocket.delete(socketId)
-  notifyPresence(user.id, false)
-
-  // Drop chats that no longer have any live participant (ephemeral by design).
-  for (const [conversationId, conversation] of [...conversations.entries()]) {
-    if (!conversation.participants.includes(user.id)) continue
-    const someoneLive = conversation.participants.some(
-      (id) => id !== user.id && usersById.has(id),
-    )
-    if (someoneLive) continue
-
-    const list = messagesByConversation.get(conversationId) || []
-    for (const message of list) {
-      if (message.type === 'photo' && message.photoId) {
-        const record = photos.get(message.photoId)
-        if (record) {
-          clearTimeout(record.timer)
-          photos.delete(message.photoId)
-        }
-      }
-    }
-    conversations.delete(conversationId)
-    messagesByConversation.delete(conversationId)
-  }
-
-  if (socketId) {
-    const sock = io.sockets.sockets.get(socketId)
-    if (sock) {
-      if (reason === 'idle') {
-        sock.emit('session:expired', {
-          reason: 'idle',
-          message: 'Signed out after 10 minutes of inactivity.',
-        })
-      }
-      sock.disconnect(true)
-    }
-  }
-}
-
-function sweepIdleUsers() {
-  const now = Date.now()
-  for (const user of [...usersById.values()]) {
-    if (user.isDemo) continue
-    const last = user.lastActiveAt || 0
-    if (now - last < IDLE_TTL_MS) continue
-    removeUserSession(user, 'idle')
-  }
-}
 
 const app = express()
 const httpServer = createServer(app)
@@ -365,6 +295,77 @@ function notifyPresence(userId, online) {
   }
 }
 
+function touchActivity(userId) {
+  if (!userId || userId === demoUser.id) return
+  lastActivityByUser.set(userId, Date.now())
+}
+
+function purgeConversation(conversationId) {
+  const list = messagesByConversation.get(conversationId) || []
+  for (const message of list) {
+    if (message.type === 'photo' && message.photoId) {
+      const record = photos.get(message.photoId)
+      if (record) {
+        clearTimeout(record.timer)
+        photos.delete(message.photoId)
+      }
+    }
+  }
+  conversations.delete(conversationId)
+  messagesByConversation.delete(conversationId)
+}
+
+function cleanupOrphanConversations(userId) {
+  for (const conversation of [...conversations.values()]) {
+    if (!conversation.participants.includes(userId)) continue
+    const someoneOnline = conversation.participants.some((participantId) => {
+      const participant = usersById.get(participantId)
+      return Boolean(participant && !participant.isDemo)
+    })
+    if (someoneOnline) continue
+
+    for (const participantId of conversation.participants) {
+      io.to(`user:${participantId}`).emit('conversation:deleted', {
+        conversationId: conversation.id,
+      })
+    }
+    purgeConversation(conversation.id)
+  }
+}
+
+function removeLiveUser(user, { reason } = {}) {
+  if (!user || user.isDemo) return
+  if (!usersById.has(user.id)) return
+
+  for (const [callId, call] of [...activeCalls.entries()]) {
+    if (call.fromUserId !== user.id && call.toUserId !== user.id) continue
+    activeCalls.delete(callId)
+    const otherId =
+      call.fromUserId === user.id ? call.toUserId : call.fromUserId
+    io.to(`user:${otherId}`).emit('call:ended', { callId })
+  }
+
+  if (reason === 'idle' && user.socketId) {
+    io.to(user.socketId).emit('session:expired', {
+      reason: 'idle',
+      message: 'Signed out after 10 minutes of inactivity.',
+    })
+  }
+
+  const socketId = user.socketId
+  if (socketId) usersBySocket.delete(socketId)
+  usersById.delete(user.id)
+  viewingConversation.delete(user.id)
+  lastActivityByUser.delete(user.id)
+  notifyPresence(user.id, false)
+  cleanupOrphanConversations(user.id)
+
+  if (socketId) {
+    const sock = io.sockets.sockets.get(socketId)
+    if (sock) sock.disconnect(true)
+  }
+}
+
 function listConversationsFor(userId) {
   return [...conversations.values()]
     .filter((c) => c.participants.includes(userId))
@@ -519,8 +520,8 @@ function maybeDemoPhotoReply(conversation, fromUser) {
 
 io.on('connection', (socket) => {
   socket.onAny(() => {
-    const me = usersBySocket.get(socket.id)
-    if (me) touchActivity(me)
+    const user = usersBySocket.get(socket.id)
+    if (user) touchActivity(user.id)
   })
 
   socket.on('join', ({ name }, callback) => {
@@ -543,17 +544,12 @@ io.on('connection', (socket) => {
       return
     }
 
-    const user = {
-      id: randomUUID(),
-      name: trimmed,
-      socketId: socket.id,
-      lastActiveAt: Date.now(),
-    }
+    const user = { id: randomUUID(), name: trimmed, socketId: socket.id }
     usersBySocket.set(socket.id, user)
     usersById.set(user.id, user)
     viewingConversation.set(user.id, null)
+    touchActivity(user.id)
     socket.join(`user:${user.id}`)
-    touchActivity(user)
     notifyPresence(user.id, true)
 
     callback?.({
@@ -563,27 +559,12 @@ io.on('connection', (socket) => {
     })
   })
 
-  socket.on('presence:ping', (callback) => {
-    const me = usersBySocket.get(socket.id)
-    if (!me) {
-      callback?.({ error: 'Not joined' })
-      return
-    }
-    touchActivity(me)
-    callback?.({
-      ok: true,
-      idleTimeoutMs: IDLE_TTL_MS,
-      remainingMs: Math.max(0, IDLE_TTL_MS - (Date.now() - (me.lastActiveAt || 0))),
-    })
-  })
-
   socket.on('users:search', ({ name }, callback) => {
     const me = usersBySocket.get(socket.id)
     if (!me) {
       callback?.({ error: 'Not joined' })
       return
     }
-    touchActivity(me)
 
     const query = String(name || '').trim().toLowerCase()
     if (query.length < 1) {
@@ -688,6 +669,16 @@ io.on('connection', (socket) => {
     const me = usersBySocket.get(socket.id)
     if (!me) return
     viewingConversation.set(me.id, null)
+  })
+
+  socket.on('presence:ping', (callback) => {
+    const me = usersBySocket.get(socket.id)
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+    touchActivity(me.id)
+    callback?.({ ok: true })
   })
 
   socket.on('message:send', ({ conversationId, text, replyToMessageId }, callback) => {
@@ -1052,11 +1043,22 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const user = usersBySocket.get(socket.id)
     if (!user || user.isDemo) return
-    removeUserSession(user, 'disconnect')
+    removeLiveUser(user)
   })
 })
 
-setInterval(sweepIdleUsers, IDLE_SWEEP_MS)
+setInterval(() => {
+  const now = Date.now()
+  for (const [userId, lastActive] of [...lastActivityByUser.entries()]) {
+    if (now - lastActive < IDLE_TTL_MS) continue
+    const user = usersById.get(userId)
+    if (!user || user.isDemo) {
+      lastActivityByUser.delete(userId)
+      continue
+    }
+    removeLiveUser(user, { reason: 'idle' })
+  }
+}, IDLE_CHECK_MS)
 
 const distPath = join(__dirname, '..', 'dist')
 if (existsSync(distPath)) {
@@ -1069,5 +1071,4 @@ if (existsSync(distPath)) {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`chatriv server on http://0.0.0.0:${PORT}`)
   console.log(`demo account online: search “${DEMO_NAME}”`)
-  console.log(`idle sign-out: ${IDLE_TTL_MS / 60000} minutes`)
 })

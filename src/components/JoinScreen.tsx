@@ -60,8 +60,8 @@ export function JoinScreen({ onJoin, joining, error }: JoinScreenProps) {
           Conversations that stay intentional.
         </h1>
         <p className="join__copy">
-          Choose a display name to begin. Sessions are temporary — idle accounts
-          sign out after 10 minutes, and shared photos disappear after 10 minutes.
+          Choose a display name to begin. Sessions and shared photos expire after
+          10 minutes of inactivity — nothing is stored permanently.
         </p>
         <form
           className="join__form"
