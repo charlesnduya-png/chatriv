@@ -1090,12 +1090,6 @@ button {
   margin-bottom: 0.85rem;
 }
 
-.bubble-wrap:hover .bubble-tools,
-.bubble-wrap:focus-within .bubble-tools {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .bubble-wrap.is-flash .bubble {
   box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.55);
 }
@@ -1193,36 +1187,6 @@ button {
 
 .bubble--mine.bubble--photo {
   background: var(--wa-out);
-}
-
-.bubble-tools {
-  position: absolute;
-  top: 50%;
-  right: -4.4rem;
-  transform: translateY(-50%);
-  display: flex;
-  gap: 0.25rem;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
-}
-
-.bubble-tools--mine {
-  right: auto;
-  left: -4.4rem;
-  flex-direction: row-reverse;
-}
-
-.react-open {
-  width: 1.7rem;
-  height: 1.7rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(32, 44, 51, 0.95);
-  color: #e2e8f0;
-  font-size: 0.85rem;
-  line-height: 1;
-  padding: 0;
 }
 
 .msg-actions {
@@ -1758,10 +1722,6 @@ button {
   }
 
   .install {
-    display: none;
-  }
-
-  .bubble-tools {
     display: none;
   }
 

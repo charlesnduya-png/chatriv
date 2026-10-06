@@ -429,27 +429,6 @@ function MessageBubble({
           ))}
         </div>
       ) : null}
-
-      <div className={`bubble-tools${mine ? ' bubble-tools--mine' : ''}`}>
-        <button
-          type="button"
-          className="react-open"
-          aria-label="Reply"
-          title="Reply"
-          onClick={() => onReply(message)}
-        >
-          ↩
-        </button>
-        <button
-          type="button"
-          className="react-open"
-          aria-label="Add reaction"
-          title="React"
-          onClick={() => setPickerOpen((open) => !open)}
-        >
-          +
-        </button>
-      </div>
     </div>
   )
 }

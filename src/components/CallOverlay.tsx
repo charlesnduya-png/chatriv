@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CallMode, User } from '../types'
+import { playRing, stopRing } from '../sounds'
 
 type CallOverlayProps = {
   phase: 'outgoing' | 'incoming' | 'connected'
@@ -78,6 +79,15 @@ export function CallOverlay({
       setElapsed(Math.floor((Date.now() - started) / 1000))
     }, 1000)
     return () => window.clearInterval(id)
+  }, [phase])
+
+  useEffect(() => {
+    if (phase === 'incoming' || phase === 'outgoing') {
+      void playRing()
+      return () => stopRing()
+    }
+    stopRing()
+    return undefined
   }, [phase])
 
   useEffect(() => {

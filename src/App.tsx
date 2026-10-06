@@ -6,6 +6,7 @@ import { ChatShell } from './components/ChatShell'
 import { CallOverlay } from './components/CallOverlay'
 import { useCall } from './useCall'
 import { useIdleSignOut } from './useIdleSignOut'
+import { playMessageNote, unlockSounds } from './sounds'
 import './App.css'
 
 function upsertConversation(
@@ -146,6 +147,10 @@ export default function App() {
       })
     })
     socket.on('message:new', (message) => {
+      const selfId = meRef.current?.id
+      if (selfId && message.senderId !== selfId) {
+        void playMessageNote()
+      }
       setActiveId((current) => {
         if (current === message.conversationId) {
           setMessages((prev) =>
@@ -214,6 +219,7 @@ export default function App() {
     if (!socket) return
     setJoining(true)
     setError(null)
+    void unlockSounds()
 
     if (!socket.connected) {
       socket.connect()
