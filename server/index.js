@@ -5,10 +5,7 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import {
-  createBusinessCheckout,
-  hasCdpCredentials,
-} from './coinbase.js'
+import { generateJwt } from '@coinbase/cdp-sdk/auth'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
@@ -149,6 +146,22 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.post('/api/crypto/charge', async (req, res) => {
+  const apiKeyId = String(
+    process.env.CDP_API_KEY_ID || process.env.COINBASE_CDP_API_KEY_ID || '',
+  ).trim()
+  const apiKeySecret = String(
+    process.env.CDP_API_KEY_SECRET ||
+      process.env.COINBASE_CDP_API_KEY_SECRET ||
+      '',
+  ).trim()
+
+  if (!apiKeyId || !apiKeySecret) {
+    res.status(503).json({
+      error: 'Crypto payments are not configured on this server yet.',
+    })
+    return
+  }
+
   const amountRaw = req.body?.amount
   const amountNumber = Number(amountRaw)
   if (!Number.isFinite(amountNumber) || amountNumber < 1 || amountNumber > 10000) {
@@ -164,78 +177,40 @@ app.post('/api/crypto/charge', async (req, res) => {
     .trim()
     .slice(0, 32)
   const conversationId = String(req.body?.conversationId || '').slice(0, 64)
-  const description = note
-    ? `${fromName}: ${note}`
-    : `Crypto payment started in Chatriv by ${fromName}`
+  const requestHost = 'business.coinbase.com'
+  const requestPath = '/api/v1/checkouts'
+  const requestMethod = 'POST'
 
-  if (hasCdpCredentials()) {
-    try {
-      const checkout = await createBusinessCheckout({
+  try {
+    const jwt = await generateJwt({
+      apiKeyId,
+      apiKeySecret,
+      requestMethod,
+      requestHost,
+      requestPath,
+      expiresIn: 120,
+    })
+
+    const response = await fetch(`https://${requestHost}${requestPath}`, {
+      method: requestMethod,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${jwt}`,
+        'X-Idempotency-Key': randomUUID(),
+      },
+      body: JSON.stringify({
         amount,
         currency: 'USD',
-        description,
+        description: note
+          ? `${fromName}: ${note}`
+          : `Chatriv crypto payment from ${fromName}`,
+        successRedirectUrl: 'https://chatriv.com/',
+        failRedirectUrl: 'https://chatriv.com/',
         metadata: {
           source: 'chatriv-chicken',
           fromName,
           conversationId: conversationId || 'none',
-        },
-      })
-
-      const hostedUrl = checkout?.url
-      if (!hostedUrl) {
-        res.status(502).json({ error: 'Coinbase did not return a payment link.' })
-        return
-      }
-
-      res.json({
-        hostedUrl,
-        code: checkout?.id || null,
-        amount: checkout?.fiatAmount || checkout?.amount || amount,
-        currency: checkout?.fiatCurrency || checkout?.currency || 'USD',
-        expiresAt: checkout?.expiresAt || null,
-      })
-      return
-    } catch (error) {
-      res.status(502).json({
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Could not create Coinbase checkout.',
-      })
-      return
-    }
-  }
-
-  const apiKey = String(process.env.COINBASE_COMMERCE_API_KEY || '').trim()
-  if (!apiKey) {
-    res.status(503).json({
-      error: 'Crypto payments are not configured on this server yet.',
-    })
-    return
-  }
-
-  try {
-    const response = await fetch('https://api.commerce.coinbase.com/charges', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CC-Api-Key': apiKey,
-        'X-CC-Version': '2018-03-22',
-      },
-      body: JSON.stringify({
-        name: note || `Chatriv crypto from ${fromName}`,
-        description,
-        pricing_type: 'fixed_price',
-        local_price: {
-          amount,
-          currency: 'USD',
-        },
-        redirect_url: 'https://chatriv.com/',
-        cancel_url: 'https://chatriv.com/',
-        metadata: {
-          source: 'chatriv-chicken',
-          fromName,
-          conversationId: conversationId || undefined,
         },
       }),
     })
@@ -248,18 +223,20 @@ app.post('/api/crypto/charge', async (req, res) => {
       payload = {}
     }
     if (!response.ok) {
-      const message =
+      let message =
+        payload?.errorMessage ||
         payload?.error?.message ||
         (typeof payload?.error === 'string' ? payload.error : null) ||
-        (response.status === 503
-          ? 'Coinbase Commerce is unavailable. Add a Coinbase Business CDP secret API key instead.'
-          : `Coinbase Commerce error (${response.status})`)
+        `Coinbase Checkout error (${response.status})`
+      if (response.status === 403) {
+        message =
+          'Coinbase rejected this API key for Checkouts. Create a Coinbase Business account, then make a CDP Secret API key with the View scope for Checkouts.'
+      }
       res.status(502).json({ error: String(message) })
       return
     }
 
-    const data = payload?.data || payload
-    const hostedUrl = data?.hosted_url
+    const hostedUrl = payload?.url
     if (!hostedUrl) {
       res.status(502).json({ error: 'Coinbase did not return a payment link.' })
       return
@@ -267,17 +244,17 @@ app.post('/api/crypto/charge', async (req, res) => {
 
     res.json({
       hostedUrl,
-      code: data?.code || null,
-      amount,
-      currency: 'USD',
-      expiresAt: data?.expires_at || null,
+      code: payload?.id || null,
+      amount: payload?.fiatAmount || amount,
+      currency: payload?.fiatCurrency || payload?.currency || 'USD',
+      expiresAt: payload?.expiresAt || null,
     })
   } catch (error) {
     res.status(502).json({
       error:
         error instanceof Error
           ? error.message
-          : 'Could not reach Coinbase Commerce.',
+          : 'Could not reach Coinbase Checkout.',
     })
   }
 })
