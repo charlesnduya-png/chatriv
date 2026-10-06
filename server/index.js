@@ -45,14 +45,6 @@ const ALLOWED_STICKERS = new Set([
  * }} Message */
 /** @typedef {{ id: string, participants: [string, string], names: Record<string, string>, createdAt: number }} Conversation */
 /** @typedef {{ buffer: Buffer, mime: string, fileName: string, conversationId: string, expiresAt: number, timer: NodeJS.Timeout }} PhotoRecord */
-/** @typedef {{
- *  id: string,
- *  conversationId: string,
- *  fromUserId: string,
- *  toUserId: string,
- *  mode: 'audio' | 'video',
- *  status: 'ringing' | 'active'
- * }} CallSession */
 
 /** @type {Map<string, User>} */
 const usersBySocket = new Map()
@@ -66,29 +58,15 @@ const messagesByConversation = new Map()
 const photos = new Map()
 /** @type {Map<string, string | null>} */
 const viewingConversation = new Map()
+/** @typedef {{
+ *  id: string,
+ *  conversationId: string,
+ *  mode: 'audio' | 'video',
+ *  fromUserId: string,
+ *  toUserId: string
+ * }} CallSession */
 /** @type {Map<string, CallSession>} */
-const callsById = new Map()
-/** @type {Map<string, string>} */
-const callIdByUser = new Map()
-
-function findCallForUser(userId) {
-  const callId = callIdByUser.get(userId)
-  return callId ? callsById.get(callId) || null : null
-}
-
-function endCall(call, reason) {
-  if (!call || !callsById.has(call.id)) return
-  callsById.delete(call.id)
-  callIdByUser.delete(call.fromUserId)
-  callIdByUser.delete(call.toUserId)
-  const payload = {
-    callId: call.id,
-    conversationId: call.conversationId,
-    reason,
-  }
-  io.to(`user:${call.fromUserId}`).emit('call:ended', payload)
-  io.to(`user:${call.toUserId}`).emit('call:ended', payload)
-}
+const activeCalls = new Map()
 
 const demoUser = {
   id: 'demo-dolly',
@@ -104,6 +82,9 @@ const httpServer = createServer(app)
 const defaultOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'https://chatriv.com',
+  'https://www.chatriv.com',
+  'https://chatriv.fly.dev',
 ]
 const envOrigins = String(process.env.CLIENT_URLS || '')
   .split(',')
@@ -813,62 +794,48 @@ io.on('connection', (socket) => {
 
   socket.on('call:invite', ({ conversationId, mode }, callback) => {
     const me = usersBySocket.get(socket.id)
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
     const conversation = conversations.get(conversationId)
-    const callMode = mode === 'video' ? 'video' : 'audio'
-
-    if (!me || !conversation || !conversation.participants.includes(me.id)) {
+    if (!conversation || !conversation.participants.includes(me.id)) {
       callback?.({ error: 'Conversation not found' })
       return
     }
-
-    if (findCallForUser(me.id)) {
-      callback?.({ error: 'You are already in a call' })
+    const callMode = mode === 'video' ? 'video' : 'audio'
+    const otherId = otherParticipant(conversation, me.id)
+    const other = usersById.get(otherId)
+    if (!other?.socketId) {
+      callback?.({ error: 'That person is offline' })
       return
     }
-
-    const otherId = conversation.participants.find((id) => id !== me.id)
-    const other = otherId ? usersById.get(otherId) : null
-    if (!other) {
-      callback?.({ error: 'Contact is offline' })
-      return
+    for (const call of activeCalls.values()) {
+      if (call.fromUserId === me.id || call.toUserId === me.id) {
+        callback?.({ error: 'You are already in a call' })
+        return
+      }
+      if (call.fromUserId === otherId || call.toUserId === otherId) {
+        callback?.({ error: 'That person is already in a call' })
+        return
+      }
     }
-
-    if (other.isDemo) {
-      callback?.({ error: 'Dolly can’t take calls — message a real person instead' })
-      return
-    }
-
-    if (!other.socketId) {
-      callback?.({ error: `${other.name} is offline` })
-      return
-    }
-
-    if (findCallForUser(other.id)) {
-      callback?.({ error: `${other.name} is already in a call` })
-      return
-    }
-
-    const call = {
-      id: randomUUID(),
+    const callId = randomUUID()
+    activeCalls.set(callId, {
+      id: callId,
       conversationId,
-      fromUserId: me.id,
-      toUserId: other.id,
       mode: callMode,
-      status: 'ringing',
-    }
-    callsById.set(call.id, call)
-    callIdByUser.set(me.id, call.id)
-    callIdByUser.set(other.id, call.id)
-
-    io.to(`user:${other.id}`).emit('call:incoming', {
-      callId: call.id,
+      fromUserId: me.id,
+      toUserId: otherId,
+    })
+    io.to(`user:${otherId}`).emit('call:incoming', {
+      callId,
       conversationId,
       mode: callMode,
       from: publicUser(me),
     })
-
     callback?.({
-      callId: call.id,
+      callId,
       conversationId,
       mode: callMode,
       to: publicUser(other),
@@ -877,66 +844,70 @@ io.on('connection', (socket) => {
 
   socket.on('call:accept', ({ callId }, callback) => {
     const me = usersBySocket.get(socket.id)
-    const call = callsById.get(callId)
-    if (!me || !call || call.toUserId !== me.id || call.status !== 'ringing') {
-      callback?.({ error: 'Call not available' })
+    if (!me) {
+      callback?.({ error: 'Not joined' })
       return
     }
-
-    call.status = 'active'
+    const call = activeCalls.get(callId)
+    if (!call || call.toUserId !== me.id) {
+      callback?.({ error: 'Call not found' })
+      return
+    }
     io.to(`user:${call.fromUserId}`).emit('call:accepted', {
       callId: call.id,
       conversationId: call.conversationId,
       mode: call.mode,
-      from: publicUser(me),
     })
-    callback?.({
-      callId: call.id,
-      conversationId: call.conversationId,
-      mode: call.mode,
-    })
+    callback?.({ ok: true })
   })
 
   socket.on('call:reject', ({ callId }, callback) => {
     const me = usersBySocket.get(socket.id)
-    const call = callsById.get(callId)
-    if (!me || !call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+    const call = activeCalls.get(callId)
+    if (!call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
       callback?.({ error: 'Call not found' })
       return
     }
-    endCall(call, 'rejected')
+    activeCalls.delete(callId)
+    const otherId = call.fromUserId === me.id ? call.toUserId : call.fromUserId
+    io.to(`user:${otherId}`).emit('call:ended', { callId })
     callback?.({ ok: true })
   })
 
   socket.on('call:end', ({ callId }, callback) => {
     const me = usersBySocket.get(socket.id)
-    const call = callsById.get(callId)
-    if (!me || !call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
-      callback?.({ error: 'Call not found' })
+    if (!me) {
+      callback?.({ error: 'Not joined' })
       return
     }
-    endCall(call, 'ended')
+    const call = activeCalls.get(callId)
+    if (!call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
+      callback?.({ ok: true })
+      return
+    }
+    activeCalls.delete(callId)
+    const otherId = call.fromUserId === me.id ? call.toUserId : call.fromUserId
+    io.to(`user:${otherId}`).emit('call:ended', { callId })
     callback?.({ ok: true })
   })
 
   socket.on('call:signal', ({ callId, signal }, callback) => {
     const me = usersBySocket.get(socket.id)
-    const call = callsById.get(callId)
-    if (!me || !call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+    const call = activeCalls.get(callId)
+    if (!call || (call.toUserId !== me.id && call.fromUserId !== me.id)) {
       callback?.({ error: 'Call not found' })
       return
     }
-    if (!signal || typeof signal !== 'object') {
-      callback?.({ error: 'Invalid signal' })
-      return
-    }
-
     const otherId = call.fromUserId === me.id ? call.toUserId : call.fromUserId
-    io.to(`user:${otherId}`).emit('call:signal', {
-      callId,
-      fromUserId: me.id,
-      signal,
-    })
+    io.to(`user:${otherId}`).emit('call:signal', { callId, signal })
     callback?.({ ok: true })
   })
 
@@ -944,8 +915,13 @@ io.on('connection', (socket) => {
     const user = usersBySocket.get(socket.id)
     if (!user || user.isDemo) return
 
-    const activeCall = findCallForUser(user.id)
-    if (activeCall) endCall(activeCall, 'disconnected')
+    for (const [callId, call] of [...activeCalls.entries()]) {
+      if (call.fromUserId !== user.id && call.toUserId !== user.id) continue
+      activeCalls.delete(callId)
+      const otherId =
+        call.fromUserId === user.id ? call.toUserId : call.fromUserId
+      io.to(`user:${otherId}`).emit('call:ended', { callId })
+    }
 
     usersBySocket.delete(socket.id)
     usersById.delete(user.id)

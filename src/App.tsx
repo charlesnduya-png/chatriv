@@ -59,7 +59,6 @@ function readFileAsDataUrl(file: File) {
 export default function App() {
   const socketRef = useRef<AppSocket | null>(null)
   const meRef = useRef<User | null>(null)
-  const [socketReady, setSocketReady] = useState<AppSocket | null>(null)
   const [me, setMe] = useState<User | null>(null)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -71,23 +70,12 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHint, setSearchHint] = useState<string | null>(null)
+  const [socketReady, setSocketReady] = useState<AppSocket | null>(null)
 
-  const reportError = (message: string) => setError(message)
-
-  const {
-    activeCall,
-    localStream,
-    remoteStream,
-    muted,
-    cameraOff,
-    startCall,
-    acceptCall,
-    rejectCall,
-    hangUp,
-    toggleMute,
-    toggleCamera,
-    resetCall,
-  } = useCall({ socket: socketReady, onError: reportError })
+  const call = useCall({
+    socket: socketReady,
+    onError: (message) => setError(message),
+  })
 
   useEffect(() => {
     meRef.current = me
@@ -334,6 +322,14 @@ export default function App() {
     })
   }
 
+  function closeConversation() {
+    const socket = socketRef.current
+    socket?.emit('conversation:blur')
+    setActiveId(null)
+    setMessages([])
+    setError(null)
+  }
+
   function sendMessage(text: string) {
     const socket = socketRef.current
     if (!socket || !activeId) return
@@ -419,7 +415,6 @@ export default function App() {
 
   function signOut() {
     sessionStorage.removeItem('chatriv:name')
-    resetCall()
     const socket = socketRef.current
     if (socket) {
       socket.disconnect()
@@ -437,21 +432,16 @@ export default function App() {
     setSendingPhoto(false)
   }
 
-  function beginCall(mode: CallMode) {
-    const active = conversations.find((c) => c.id === activeId) ?? null
-    if (!active) return
-    if (!active.otherOnline) {
-      setError(`${active.other.name} is offline`)
-      return
-    }
-    startCall(active.id, mode, active.other)
-  }
-
   if (!me) {
     return <JoinScreen onJoin={join} joining={joining} error={error} />
   }
 
   const active = conversations.find((c) => c.id === activeId) ?? null
+
+  function startVoiceOrVideo(mode: CallMode) {
+    if (!active) return
+    call.startCall(active.id, mode, active.other)
+  }
 
   return (
     <>
@@ -466,33 +456,33 @@ export default function App() {
         searchResults={searchResults}
         searching={searching}
         searchHint={searchHint}
-        callBusy={Boolean(activeCall)}
         onSearch={searchUsers}
         onStartChat={startChat}
         onOpenConversation={openConversation}
+        onCloseConversation={closeConversation}
         onSendMessage={sendMessage}
         onSendPhoto={sendPhoto}
         onSendSticker={sendSticker}
         onReact={reactToMessage}
         onDeleteConversation={deleteConversation}
         onSignOut={signOut}
-        onVoiceCall={() => beginCall('audio')}
-        onVideoCall={() => beginCall('video')}
+        onVoiceCall={() => startVoiceOrVideo('audio')}
+        onVideoCall={() => startVoiceOrVideo('video')}
       />
-      {activeCall ? (
+      {call.activeCall ? (
         <CallOverlay
-          phase={activeCall.phase}
-          mode={activeCall.mode}
-          peer={activeCall.peer}
-          muted={muted}
-          cameraOff={cameraOff}
-          localStream={localStream}
-          remoteStream={remoteStream}
-          onAccept={() => void acceptCall()}
-          onReject={rejectCall}
-          onHangUp={hangUp}
-          onToggleMute={toggleMute}
-          onToggleCamera={toggleCamera}
+          phase={call.activeCall.phase}
+          mode={call.activeCall.mode}
+          peer={call.activeCall.peer}
+          muted={call.muted}
+          cameraOff={call.cameraOff}
+          localStream={call.localStream}
+          remoteStream={call.remoteStream}
+          onAccept={() => void call.acceptCall()}
+          onReject={call.rejectCall}
+          onHangUp={call.hangUp}
+          onToggleMute={call.toggleMute}
+          onToggleCamera={call.toggleCamera}
         />
       ) : null}
     </>

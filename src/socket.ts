@@ -1,7 +1,6 @@
 import { io, Socket } from 'socket.io-client'
 import type {
   CallMode,
-  CallReason,
   CallSignal,
   ConversationSummary,
   Message,
@@ -68,9 +67,7 @@ export type ClientToServer = {
   ) => void
   'call:accept': (
     payload: { callId: string },
-    callback: (
-      res: Ack<{ callId: string; conversationId: string; mode: CallMode }>,
-    ) => void,
+    callback: (res: Ack<{ ok: boolean }>) => void,
   ) => void
   'call:reject': (
     payload: { callId: string },
@@ -115,18 +112,9 @@ export type ServerToClient = {
     callId: string
     conversationId: string
     mode: CallMode
-    from: User
   }) => void
-  'call:ended': (payload: {
-    callId: string
-    conversationId: string
-    reason: CallReason
-  }) => void
-  'call:signal': (payload: {
-    callId: string
-    fromUserId: string
-    signal: CallSignal
-  }) => void
+  'call:ended': (payload: { callId: string }) => void
+  'call:signal': (payload: { callId: string; signal: CallSignal }) => void
 }
 
 export type AppSocket = Socket<ServerToClient, ClientToServer>

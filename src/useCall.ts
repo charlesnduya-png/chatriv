@@ -207,7 +207,6 @@ export function useCall({ socket, onError }: UseCallOptions) {
       callId: string
       conversationId: string
       mode: CallMode
-      from: User
     }) => {
       const current = callRef.current
       if (!current || current.callId !== payload.callId) return
@@ -216,7 +215,7 @@ export function useCall({ socket, onError }: UseCallOptions) {
         await attachLocalMedia(payload.callId, payload.mode)
         setActiveCall((prev) =>
           prev && prev.callId === payload.callId
-            ? { ...prev, phase: 'connected', peer: payload.from }
+            ? { ...prev, phase: 'connected' }
             : prev,
         )
         await createOffer(payload.callId)

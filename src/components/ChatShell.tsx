@@ -16,10 +16,10 @@ type ChatShellProps = {
   searchResults: User[]
   searching: boolean
   searchHint: string | null
-  callBusy: boolean
   onSearch: (name: string) => void
   onStartChat: (otherUserId: string) => void
   onOpenConversation: (conversationId: string) => void
+  onCloseConversation: () => void
   onSendMessage: (text: string) => void
   onSendPhoto: (file: File) => void
   onSendSticker: (sticker: string) => void
@@ -349,10 +349,10 @@ export function ChatShell({
   searchResults,
   searching,
   searchHint,
-  callBusy,
   onSearch,
   onStartChat,
   onOpenConversation,
+  onCloseConversation,
   onSendMessage,
   onSendPhoto,
   onSendSticker,
@@ -382,12 +382,11 @@ export function ChatShell({
   }, [searchQuery])
 
   return (
-    <div className="shell">
+    <div className={`shell${active ? ' shell--chat-open' : ''}`}>
       <aside className="sidebar">
         <header className="sidebar__brand">
-          <Logo size="sm" />
-          <div className="sidebar__you-row">
-            <p className="sidebar__you">Signed in as {me.name}</p>
+          <div className="sidebar__brand-row">
+            <Logo size="sm" />
             <button
               type="button"
               className="sidebar__signout"
@@ -396,14 +395,14 @@ export function ChatShell({
               Sign out
             </button>
           </div>
+          <p className="sidebar__you">{me.name}</p>
           <InstallPrompt />
         </header>
 
         <section className="sidebar__section">
-          <h2 className="sidebar__heading">Directory</h2>
+          <h2 className="sidebar__heading">Chats</h2>
           <p className="sidebar__empty">
-            Type an exact display name (or the start of it), then Search.
-            Demo: search <strong>dolly</strong>.
+            Search a display name to start messaging. Demo: <strong>dolly</strong>.
           </p>
           <form
             className="search"
@@ -447,9 +446,9 @@ export function ChatShell({
         </section>
 
         <section className="sidebar__section sidebar__section--grow">
-          <h2 className="sidebar__heading">Conversations</h2>
+          <h2 className="sidebar__heading">Recent</h2>
           {conversations.length === 0 ? (
-            <p className="sidebar__empty">No threads yet.</p>
+            <p className="sidebar__empty">No chats yet.</p>
           ) : (
             <ul className="threads">
               {conversations.map((conversation) => {
@@ -502,23 +501,24 @@ export function ChatShell({
           <>
             <header className="stage__header">
               <div className="stage__identity">
+                <button
+                  type="button"
+                  className="stage__back"
+                  onClick={onCloseConversation}
+                  aria-label="Back to chats"
+                >
+                  ←
+                </button>
                 <span
                   className={`stage__avatar${active.otherOnline ? ' is-online' : ''}`}
                   aria-hidden
                 >
                   {initials(active.other.name)}
                 </span>
-                <div>
+                <div className="stage__titles">
                   <h1 className="stage__title">{active.other.name}</h1>
                   <p className={`stage__subtitle${active.otherOnline ? ' is-online' : ''}`}>
-                    {active.otherOnline ? (
-                      <>
-                        <span className="stage__online-dot" aria-hidden />
-                        Online
-                      </>
-                    ) : (
-                      'Offline'
-                    )}
+                    {active.otherOnline ? 'online' : 'offline'}
                   </p>
                 </div>
               </div>
@@ -527,25 +527,17 @@ export function ChatShell({
                   type="button"
                   className="stage__call"
                   onClick={onVoiceCall}
-                  disabled={!active.otherOnline || callBusy}
-                  title={
-                    active.otherOnline
-                      ? 'Voice call'
-                      : `${active.other.name} is offline`
-                  }
+                  aria-label="Voice call"
+                  title="Voice call"
                 >
                   Call
                 </button>
                 <button
                   type="button"
-                  className="stage__call stage__call--video"
+                  className="stage__call"
                   onClick={onVideoCall}
-                  disabled={!active.otherOnline || callBusy}
-                  title={
-                    active.otherOnline
-                      ? 'Video call'
-                      : `${active.other.name} is offline`
-                  }
+                  aria-label="Video call"
+                  title="Video call"
                 >
                   Video
                 </button>
@@ -553,6 +545,8 @@ export function ChatShell({
                   type="button"
                   className="stage__delete"
                   onClick={() => onDeleteConversation(active.id)}
+                  aria-label="Delete conversation"
+                  title="Delete conversation"
                 >
                   Delete
                 </button>
@@ -680,8 +674,8 @@ export function ChatShell({
                 maxLength={2000}
                 autoFocus
               />
-              <button className="composer__send" type="submit" disabled={!draft.trim()}>
-                Send
+              <button className="composer__send" type="submit" disabled={!draft.trim()} aria-label="Send">
+                ➤
               </button>
             </form>
           </>

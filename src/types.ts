@@ -1,9 +1,5 @@
 export type MessageStatus = 'sent' | 'delivered' | 'read'
 
-export type CallMode = 'audio' | 'video'
-
-export type CallReason = 'ended' | 'rejected' | 'disconnected' | 'failed'
-
 export type User = {
   id: string
   name: string
@@ -38,10 +34,12 @@ export type ConversationSummary = {
   } | null
 }
 
+export type CallMode = 'audio' | 'video'
+
 export type CallSignal =
   | { type: 'offer'; sdp: RTCSessionDescriptionInit }
   | { type: 'answer'; sdp: RTCSessionDescriptionInit }
-  | { type: 'ice'; candidate: RTCIceCandidateInit }
+  | { type: 'ice'; candidate: RTCIceCandidateInit | null }
 
 export const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'] as const
 
