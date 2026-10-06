@@ -5,6 +5,10 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import {
+  createBusinessCheckout,
+  hasCdpCredentials,
+} from './coinbase.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
@@ -145,14 +149,6 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.post('/api/crypto/charge', async (req, res) => {
-  const apiKey = String(process.env.COINBASE_COMMERCE_API_KEY || '').trim()
-  if (!apiKey) {
-    res.status(503).json({
-      error: 'Crypto payments are not configured on this server yet.',
-    })
-    return
-  }
-
   const amountRaw = req.body?.amount
   const amountNumber = Number(amountRaw)
   if (!Number.isFinite(amountNumber) || amountNumber < 1 || amountNumber > 10000) {
@@ -168,6 +164,55 @@ app.post('/api/crypto/charge', async (req, res) => {
     .trim()
     .slice(0, 32)
   const conversationId = String(req.body?.conversationId || '').slice(0, 64)
+  const description = note
+    ? `${fromName}: ${note}`
+    : `Crypto payment started in Chatriv by ${fromName}`
+
+  if (hasCdpCredentials()) {
+    try {
+      const checkout = await createBusinessCheckout({
+        amount,
+        currency: 'USD',
+        description,
+        metadata: {
+          source: 'chatriv-chicken',
+          fromName,
+          conversationId: conversationId || 'none',
+        },
+      })
+
+      const hostedUrl = checkout?.url
+      if (!hostedUrl) {
+        res.status(502).json({ error: 'Coinbase did not return a payment link.' })
+        return
+      }
+
+      res.json({
+        hostedUrl,
+        code: checkout?.id || null,
+        amount: checkout?.fiatAmount || checkout?.amount || amount,
+        currency: checkout?.fiatCurrency || checkout?.currency || 'USD',
+        expiresAt: checkout?.expiresAt || null,
+      })
+      return
+    } catch (error) {
+      res.status(502).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Could not create Coinbase checkout.',
+      })
+      return
+    }
+  }
+
+  const apiKey = String(process.env.COINBASE_COMMERCE_API_KEY || '').trim()
+  if (!apiKey) {
+    res.status(503).json({
+      error: 'Crypto payments are not configured on this server yet.',
+    })
+    return
+  }
 
   try {
     const response = await fetch('https://api.commerce.coinbase.com/charges', {
@@ -179,9 +224,7 @@ app.post('/api/crypto/charge', async (req, res) => {
       },
       body: JSON.stringify({
         name: note || `Chatriv crypto from ${fromName}`,
-        description: note
-          ? `${fromName}: ${note}`
-          : `Crypto payment started in Chatriv by ${fromName}`,
+        description,
         pricing_type: 'fixed_price',
         local_price: {
           amount,
@@ -209,7 +252,7 @@ app.post('/api/crypto/charge', async (req, res) => {
         payload?.error?.message ||
         (typeof payload?.error === 'string' ? payload.error : null) ||
         (response.status === 503
-          ? 'Coinbase Commerce is unavailable right now. Confirm your Commerce API key in the Coinbase Commerce dashboard (Settings → Security), or use a Coinbase Business Checkout secret key.'
+          ? 'Coinbase Commerce is unavailable. Add a Coinbase Business CDP secret API key instead.'
           : `Coinbase Commerce error (${response.status})`)
       res.status(502).json({ error: String(message) })
       return
@@ -217,7 +260,6 @@ app.post('/api/crypto/charge', async (req, res) => {
 
     const data = payload?.data || payload
     const hostedUrl = data?.hosted_url
-    const code = data?.code
     if (!hostedUrl) {
       res.status(502).json({ error: 'Coinbase did not return a payment link.' })
       return
@@ -225,7 +267,7 @@ app.post('/api/crypto/charge', async (req, res) => {
 
     res.json({
       hostedUrl,
-      code,
+      code: data?.code || null,
       amount,
       currency: 'USD',
       expiresAt: data?.expires_at || null,
