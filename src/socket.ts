@@ -14,7 +14,18 @@ type Ack<T> = T & { error?: string }
 export type ClientToServer = {
   join: (
     payload: { name: string },
-    callback: (res: Ack<{ user: User; conversations: ConversationSummary[] }>) => void,
+    callback: (
+      res: Ack<{
+        user: User
+        conversations: ConversationSummary[]
+        idleTimeoutMs?: number
+      }>,
+    ) => void,
+  ) => void
+  'presence:ping': (
+    callback: (
+      res: Ack<{ ok: boolean; idleTimeoutMs?: number; remainingMs?: number }>,
+    ) => void,
   ) => void
   'users:search': (
     payload: { name: string },
@@ -124,6 +135,7 @@ export type ServerToClient = {
   }) => void
   'call:ended': (payload: { callId: string }) => void
   'call:signal': (payload: { callId: string; signal: CallSignal }) => void
+  'session:expired': (payload: { reason: string; message: string }) => void
 }
 
 export type AppSocket = Socket<ServerToClient, ClientToServer>

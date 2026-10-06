@@ -60,8 +60,8 @@ export function JoinScreen({ onJoin, joining, error }: JoinScreenProps) {
           Conversations that stay intentional.
         </h1>
         <p className="join__copy">
-          Choose a display name to begin. Online users remain private and appear
-          only when searched by their exact name.
+          Choose a display name to begin. Sessions are temporary — idle accounts
+          sign out after 10 minutes, and shared photos disappear after 10 minutes.
         </p>
         <form
           className="join__form"

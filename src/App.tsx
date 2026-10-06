@@ -5,6 +5,7 @@ import { JoinScreen } from './components/JoinScreen'
 import { ChatShell } from './components/ChatShell'
 import { CallOverlay } from './components/CallOverlay'
 import { useCall } from './useCall'
+import { useIdleSignOut } from './useIdleSignOut'
 import './App.css'
 
 function upsertConversation(
@@ -80,6 +81,16 @@ export default function App() {
   useEffect(() => {
     meRef.current = me
   }, [me])
+
+  const signOutRef = useRef<(message?: string) => void>(() => {})
+
+  useIdleSignOut({
+    enabled: Boolean(me),
+    socket: socketReady,
+    onIdle: () => {
+      signOutRef.current('Signed out after 10 minutes of inactivity.')
+    },
+  })
 
   useEffect(() => {
     const socket = createSocket()
@@ -164,8 +175,16 @@ export default function App() {
       })
     })
 
+    const onSessionExpired = (payload: { message?: string }) => {
+      signOutRef.current(
+        payload.message || 'Signed out after 10 minutes of inactivity.',
+      )
+    }
+    socket.on('session:expired', onSessionExpired)
+
     return () => {
       socket.off('connect', rejoinIfNeeded)
+      socket.off('session:expired', onSessionExpired)
       socket.disconnect()
       socketRef.current = null
       setSocketReady(null)
@@ -418,8 +437,9 @@ export default function App() {
     })
   }
 
-  function signOut() {
+  function signOut(message?: string) {
     sessionStorage.removeItem('chatriv:name')
+    call.resetCall()
     const socket = socketRef.current
     if (socket) {
       socket.disconnect()
@@ -429,13 +449,15 @@ export default function App() {
     setConversations([])
     setActiveId(null)
     setMessages([])
-    setError(null)
+    setError(message || null)
     setSearchResults([])
     setSearchQuery('')
     setSearchHint(null)
     setJoining(false)
     setSendingPhoto(false)
   }
+
+  signOutRef.current = signOut
 
   if (!me) {
     return <JoinScreen onJoin={join} joining={joining} error={error} />
