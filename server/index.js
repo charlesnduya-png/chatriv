@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
 const DEMO_NAME = 'dolly'
 const PHOTO_TTL_MS = 10 * 60 * 1000
+const GROUP_MSG_TTL_MS = 5 * 60 * 1000
 const IDLE_TTL_MS = 10 * 60 * 1000
 const IDLE_CHECK_MS = 30 * 1000
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024
@@ -52,7 +53,14 @@ const ALLOWED_STICKERS = new Set([
  *    type?: 'text' | 'photo' | 'sticker'
  *  }
  * }} Message */
-/** @typedef {{ id: string, participants: [string, string], names: Record<string, string>, createdAt: number }} Conversation */
+/** @typedef {{
+ *  id: string,
+ *  kind?: 'dm' | 'group',
+ *  name?: string,
+ *  participants: string[],
+ *  names: Record<string, string>,
+ *  createdAt: number
+ * }} Conversation */
 /** @typedef {{ buffer: Buffer, mime: string, fileName: string, conversationId: string, expiresAt: number, timer: NodeJS.Timeout }} PhotoRecord */
 
 /** @type {Map<string, User>} */
@@ -65,6 +73,10 @@ const conversations = new Map()
 const messagesByConversation = new Map()
 /** @type {Map<string, PhotoRecord>} */
 const photos = new Map()
+/** @type {Map<string, string>} */
+const groupsByName = new Map()
+/** @type {Map<string, NodeJS.Timeout>} */
+const messageExpireTimers = new Map()
 /** @type {Map<string, string | null>} */
 const viewingConversation = new Map()
 /** @typedef {{
@@ -161,17 +173,54 @@ function buildReplyTo(conversation, replyToMessageId) {
   }
 }
 
-function publicMessage(message) {
+function senderDisplayName(conversation, senderId) {
+  return (
+    usersById.get(senderId)?.name ||
+    conversation?.names?.[senderId] ||
+    'Someone'
+  )
+}
+
+function publicMessage(message, conversation) {
   const status = message.status || 'sent'
   const reactions = message.reactions || {}
   const base = {
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
+    senderName: senderDisplayName(conversation, message.senderId),
     createdAt: message.createdAt,
     status,
     reactions,
     replyTo: message.replyTo || undefined,
+    expiresAt: message.expiresAt,
+  }
+
+  if (message.expired) {
+    if (message.type === 'photo') {
+      return {
+        ...base,
+        type: 'photo',
+        text: 'Photo disappeared',
+        expired: true,
+        photoId: undefined,
+      }
+    }
+    if (message.type === 'sticker') {
+      return {
+        ...base,
+        type: 'sticker',
+        text: 'Sticker disappeared',
+        expired: true,
+        sticker: undefined,
+      }
+    }
+    return {
+      ...base,
+      type: 'text',
+      text: 'Message disappeared',
+      expired: true,
+    }
   }
 
   if (message.type === 'sticker') {
@@ -180,6 +229,7 @@ function publicMessage(message) {
       type: 'sticker',
       text: 'Sticker',
       sticker: message.sticker,
+      expired: false,
     }
   }
 
@@ -206,6 +256,7 @@ function publicMessage(message) {
     ...base,
     text: message.text,
     type: 'text',
+    expired: false,
   }
 }
 
@@ -250,41 +301,70 @@ function otherParticipant(conversation, userId) {
   return conversation.participants.find((id) => id !== userId)
 }
 
-function previewText(message) {
+function previewText(message, conversation) {
   if (!message) return null
-  if (message.type === 'photo') {
-    return message.expired ? 'Photo disappeared' : 'Photo'
-  }
-  if (message.type === 'sticker') return 'Sticker'
-  return message.text
+  const pub = publicMessage(message, conversation)
+  return pub.text
 }
 
 function conversationFor(userId, conversation) {
-  const otherId = conversation.participants.find((id) => id !== userId)
-  const liveOther = usersById.get(otherId)
   const messages = messagesByConversation.get(conversation.id) || []
   const last = messages[messages.length - 1]
+  const lastMessage = last
+    ? {
+        text: previewText(last, conversation) || '',
+        createdAt: last.createdAt,
+        senderId: last.senderId,
+      }
+    : null
+
+  if (conversation.kind === 'group') {
+    return {
+      id: conversation.id,
+      kind: 'group',
+      name: conversation.name || 'Group',
+      memberCount: conversation.participants.length,
+      createdAt: conversation.createdAt,
+      lastMessage,
+      other: {
+        id: conversation.id,
+        name: conversation.name || 'Group',
+      },
+      otherOnline: conversation.participants.some((participantId) => {
+        if (participantId === userId) return false
+        return Boolean(usersById.get(participantId)?.socketId)
+      }),
+    }
+  }
+
+  const otherId = conversation.participants.find((id) => id !== userId)
+  const liveOther = otherId ? usersById.get(otherId) : null
   return {
     id: conversation.id,
+    kind: 'dm',
     other: {
-      id: otherId,
-      name: liveOther?.name || conversation.names[otherId] || 'Someone',
+      id: otherId || 'unknown',
+      name: liveOther?.name || (otherId ? conversation.names[otherId] : null) || 'Someone',
     },
     otherOnline: Boolean(liveOther),
     createdAt: conversation.createdAt,
-    lastMessage: last
-      ? {
-          text: previewText(publicMessage(last)) || '',
-          createdAt: last.createdAt,
-          senderId: last.senderId,
-        }
-      : null,
+    lastMessage,
   }
 }
 
 function notifyPresence(userId, online) {
   for (const conversation of conversations.values()) {
     if (!conversation.participants.includes(userId)) continue
+    if (conversation.kind === 'group') {
+      for (const participantId of conversation.participants) {
+        if (participantId === userId) continue
+        io.to(`user:${participantId}`).emit(
+          'conversation:upsert',
+          conversationFor(participantId, conversation),
+        )
+      }
+      continue
+    }
     const otherId = conversation.participants.find((id) => id !== userId)
     if (!otherId) continue
     io.to(`user:${otherId}`).emit('presence:update', {
@@ -300,9 +380,17 @@ function touchActivity(userId) {
   lastActivityByUser.set(userId, Date.now())
 }
 
+function clearMessageExpireTimer(messageId) {
+  const timer = messageExpireTimers.get(messageId)
+  if (timer) clearTimeout(timer)
+  messageExpireTimers.delete(messageId)
+}
+
 function purgeConversation(conversationId) {
+  const conversation = conversations.get(conversationId)
   const list = messagesByConversation.get(conversationId) || []
   for (const message of list) {
+    clearMessageExpireTimer(message.id)
     if (message.type === 'photo' && message.photoId) {
       const record = photos.get(message.photoId)
       if (record) {
@@ -311,6 +399,9 @@ function purgeConversation(conversationId) {
       }
     }
   }
+  if (conversation?.kind === 'group' && conversation.name) {
+    groupsByName.delete(conversation.name.toLowerCase())
+  }
   conversations.delete(conversationId)
   messagesByConversation.delete(conversationId)
 }
@@ -318,6 +409,38 @@ function purgeConversation(conversationId) {
 function cleanupOrphanConversations(userId) {
   for (const conversation of [...conversations.values()]) {
     if (!conversation.participants.includes(userId)) continue
+
+    if (conversation.kind === 'group') {
+      conversation.participants = conversation.participants.filter(
+        (participantId) => participantId !== userId,
+      )
+      delete conversation.names[userId]
+      if (conversation.participants.length === 0) {
+        purgeConversation(conversation.id)
+        continue
+      }
+      const someoneOnline = conversation.participants.some((participantId) => {
+        const participant = usersById.get(participantId)
+        return Boolean(participant && !participant.isDemo)
+      })
+      if (!someoneOnline) {
+        for (const participantId of conversation.participants) {
+          io.to(`user:${participantId}`).emit('conversation:deleted', {
+            conversationId: conversation.id,
+          })
+        }
+        purgeConversation(conversation.id)
+      } else {
+        for (const participantId of conversation.participants) {
+          io.to(`user:${participantId}`).emit(
+            'conversation:upsert',
+            conversationFor(participantId, conversation),
+          )
+        }
+      }
+      continue
+    }
+
     const someoneOnline = conversation.participants.some((participantId) => {
       const participant = usersById.get(participantId)
       return Boolean(participant && !participant.isDemo)
@@ -380,6 +503,7 @@ function listConversationsFor(userId) {
 function findConversationBetween(a, b) {
   return [...conversations.values()].find(
     (c) =>
+      c.kind !== 'group' &&
       c.participants.includes(a) &&
       c.participants.includes(b) &&
       c.participants.length === 2,
@@ -387,6 +511,33 @@ function findConversationBetween(a, b) {
 }
 
 function applyDeliveryAndRead(conversation, message) {
+  if (conversation.kind === 'group') {
+    const othersOnline = conversation.participants.some((participantId) => {
+      if (participantId === message.senderId) return false
+      const participant = usersById.get(participantId)
+      return Boolean(participant?.socketId || participant?.isDemo)
+    })
+    if (othersOnline) {
+      if (setMessageStatus(conversation, message, 'delivered')) {
+        emitStatus(conversation, [{ id: message.id, status: 'delivered' }])
+      }
+    }
+    const someoneViewing = conversation.participants.some(
+      (participantId) =>
+        participantId !== message.senderId &&
+        viewingConversation.get(participantId) === conversation.id,
+    )
+    if (someoneViewing) {
+      setTimeout(() => {
+        if (!conversations.has(conversation.id)) return
+        if (setMessageStatus(conversation, message, 'read')) {
+          emitStatus(conversation, [{ id: message.id, status: 'read' }])
+        }
+      }, 0)
+    }
+    return
+  }
+
   const recipientId = otherParticipant(conversation, message.senderId)
   const recipient = usersById.get(recipientId)
 
@@ -410,6 +561,75 @@ function applyDeliveryAndRead(conversation, message) {
   }
 }
 
+function emitMessageExpired(conversation, messageId) {
+  for (const participantId of conversation.participants) {
+    io.to(`user:${participantId}`).emit('message:expired', {
+      conversationId: conversation.id,
+      messageId,
+    })
+    io.to(`user:${participantId}`).emit(
+      'conversation:upsert',
+      conversationFor(participantId, conversation),
+    )
+  }
+}
+
+function expireMessage(conversationId, messageId) {
+  clearMessageExpireTimer(messageId)
+
+  const list = messagesByConversation.get(conversationId)
+  const conversation = conversations.get(conversationId)
+  if (!list || !conversation) return
+
+  const message = list.find((m) => m.id === messageId)
+  if (!message || message.expired) return
+
+  if (message.type === 'photo' && message.photoId) {
+    const record = photos.get(message.photoId)
+    if (record) {
+      clearTimeout(record.timer)
+      photos.delete(message.photoId)
+    }
+    message.photoId = undefined
+  }
+
+  message.expired = true
+  if (message.type === 'sticker') {
+    message.sticker = undefined
+    message.text = 'Sticker disappeared'
+  } else if (message.type === 'photo') {
+    message.text = 'Photo disappeared'
+  } else {
+    message.text = 'Message disappeared'
+  }
+
+  emitMessageExpired(conversation, messageId)
+}
+
+function scheduleGroupExpiry(conversation, message) {
+  if (conversation.kind !== 'group') return
+  const ttl = GROUP_MSG_TTL_MS
+  message.expiresAt = (message.createdAt || Date.now()) + ttl
+  clearMessageExpireTimer(message.id)
+
+  if (message.type === 'photo' && message.photoId) {
+    const record = photos.get(message.photoId)
+    if (record) {
+      clearTimeout(record.timer)
+      record.expiresAt = message.expiresAt
+      record.timer = setTimeout(() => {
+        expireMessage(conversation.id, message.id)
+      }, ttl)
+      return
+    }
+  }
+
+  const timer = setTimeout(() => {
+    expireMessage(conversation.id, message.id)
+  }, ttl)
+  messageExpireTimers.set(message.id, timer)
+}
+
 function publishMessage(conversation, message) {
   if (!message.status) message.status = 'sent'
   if (!message.reactions) message.reactions = {}
@@ -417,8 +637,9 @@ function publishMessage(conversation, message) {
   const list = messagesByConversation.get(conversation.id) || []
   list.push(message)
   messagesByConversation.set(conversation.id, list)
+  scheduleGroupExpiry(conversation, message)
 
-  const payload = publicMessage(message)
+  const payload = publicMessage(message, conversation)
   for (const participantId of conversation.participants) {
     io.to(`user:${participantId}`).emit('message:new', payload)
     io.to(`user:${participantId}`).emit(
@@ -431,32 +652,7 @@ function publishMessage(conversation, message) {
 }
 
 function expirePhoto(photoId, conversationId, messageId) {
-  const record = photos.get(photoId)
-  if (record) {
-    clearTimeout(record.timer)
-    photos.delete(photoId)
-  }
-
-  const list = messagesByConversation.get(conversationId)
-  const conversation = conversations.get(conversationId)
-  if (!list || !conversation) return
-
-  const message = list.find((m) => m.id === messageId)
-  if (!message || message.type !== 'photo') return
-
-  message.expired = true
-  message.photoId = undefined
-
-  for (const participantId of conversation.participants) {
-    io.to(`user:${participantId}`).emit('message:expired', {
-      conversationId,
-      messageId,
-    })
-    io.to(`user:${participantId}`).emit(
-      'conversation:upsert',
-      conversationFor(participantId, conversation),
-    )
-  }
+  expireMessage(conversationId, messageId)
 }
 
 function demoReply(text) {
@@ -483,6 +679,7 @@ function demoReply(text) {
 }
 
 function maybeDemoReply(conversation, fromUser, incomingText) {
+  if (conversation.kind === 'group') return
   if (!conversation.participants.includes(demoUser.id)) return
   if (fromUser.id === demoUser.id) return
 
@@ -501,6 +698,7 @@ function maybeDemoReply(conversation, fromUser, incomingText) {
 }
 
 function maybeDemoPhotoReply(conversation, fromUser) {
+  if (conversation.kind === 'group') return
   if (!conversation.participants.includes(demoUser.id)) return
   if (fromUser.id === demoUser.id) return
 
@@ -607,6 +805,7 @@ io.on('connection', (socket) => {
     if (!conversation) {
       conversation = {
         id: randomUUID(),
+        kind: 'dm',
         participants: [me.id, otherUserId],
         names: {
           [me.id]: me.name,
@@ -644,6 +843,78 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on('group:create', ({ name }, callback) => {
+    const me = usersBySocket.get(socket.id)
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+
+    const trimmed = String(name || '').trim().slice(0, 32)
+    if (!trimmed) {
+      callback?.({ error: 'Group name is required' })
+      return
+    }
+
+    const key = trimmed.toLowerCase()
+    if (groupsByName.has(key)) {
+      callback?.({ error: 'That group name is already taken' })
+      return
+    }
+
+    const conversation = {
+      id: randomUUID(),
+      kind: 'group',
+      name: trimmed,
+      participants: [me.id],
+      names: { [me.id]: me.name },
+      createdAt: Date.now(),
+    }
+    conversations.set(conversation.id, conversation)
+    messagesByConversation.set(conversation.id, [])
+    groupsByName.set(key, conversation.id)
+
+    const payload = conversationFor(me.id, conversation)
+    callback?.({ conversation: payload })
+  })
+
+  socket.on('group:join', ({ name }, callback) => {
+    const me = usersBySocket.get(socket.id)
+    if (!me) {
+      callback?.({ error: 'Not joined' })
+      return
+    }
+
+    const trimmed = String(name || '').trim().slice(0, 32)
+    if (!trimmed) {
+      callback?.({ error: 'Group name is required' })
+      return
+    }
+
+    const conversationId = groupsByName.get(trimmed.toLowerCase())
+    const conversation = conversationId
+      ? conversations.get(conversationId)
+      : null
+    if (!conversation || conversation.kind !== 'group') {
+      callback?.({ error: 'No group with that exact name' })
+      return
+    }
+
+    const alreadyIn = conversation.participants.includes(me.id)
+    if (!alreadyIn) {
+      conversation.participants.push(me.id)
+      conversation.names[me.id] = me.name
+      for (const participantId of conversation.participants) {
+        io.to(`user:${participantId}`).emit(
+          'conversation:upsert',
+          conversationFor(participantId, conversation),
+        )
+      }
+    }
+
+    callback?.({ conversation: conversationFor(me.id, conversation) })
+  })
+
   socket.on('conversation:open', ({ conversationId }, callback) => {
     const me = usersBySocket.get(socket.id)
     const conversation = conversations.get(conversationId)
@@ -656,7 +927,7 @@ io.on('connection', (socket) => {
     markMessagesRead(conversation, me.id)
 
     const messages = (messagesByConversation.get(conversationId) || []).map(
-      publicMessage,
+      (message) => publicMessage(message, conversation),
     )
 
     callback?.({
@@ -708,7 +979,7 @@ io.on('connection', (socket) => {
     }
 
     publishMessage(conversation, message)
-    callback?.({ message: publicMessage(message) })
+    callback?.({ message: publicMessage(message, conversation) })
     maybeDemoReply(conversation, me, trimmed)
   })
 
@@ -740,7 +1011,7 @@ io.on('connection', (socket) => {
     }
 
     publishMessage(conversation, message)
-    callback?.({ message: publicMessage(message) })
+    callback?.({ message: publicMessage(message, conversation) })
     maybeDemoReply(conversation, me, 'sticker')
   })
 
@@ -848,14 +1119,16 @@ io.on('connection', (socket) => {
       const photoId = randomUUID()
       const messageId = randomUUID()
       const createdAt = Date.now()
-      const expiresAt = createdAt + PHOTO_TTL_MS
+      const ttl =
+        conversation.kind === 'group' ? GROUP_MSG_TTL_MS : PHOTO_TTL_MS
+      const expiresAt = createdAt + ttl
       const safeName = String(fileName || 'photo.jpg')
         .replace(/[^\w.\- ()]/g, '_')
         .slice(0, 80)
 
       const timer = setTimeout(() => {
         expirePhoto(photoId, conversationId, messageId)
-      }, PHOTO_TTL_MS)
+      }, ttl)
 
       photos.set(photoId, {
         buffer,
@@ -884,7 +1157,7 @@ io.on('connection', (socket) => {
       }
 
       publishMessage(conversation, message)
-      callback?.({ message: publicMessage(message) })
+      callback?.({ message: publicMessage(message, conversation) })
       maybeDemoPhotoReply(conversation, me)
     },
   )
@@ -898,8 +1171,31 @@ io.on('connection', (socket) => {
       return
     }
 
+    if (conversation.kind === 'group') {
+      conversation.participants = conversation.participants.filter(
+        (participantId) => participantId !== me.id,
+      )
+      delete conversation.names[me.id]
+      io.to(`user:${me.id}`).emit('conversation:deleted', { conversationId })
+
+      if (conversation.participants.length === 0) {
+        purgeConversation(conversationId)
+      } else {
+        for (const participantId of conversation.participants) {
+          io.to(`user:${participantId}`).emit(
+            'conversation:upsert',
+            conversationFor(participantId, conversation),
+          )
+        }
+      }
+
+      callback?.({ ok: true })
+      return
+    }
+
     const list = messagesByConversation.get(conversationId) || []
     for (const message of list) {
+      clearMessageExpireTimer(message.id)
       if (message.type === 'photo' && message.photoId) {
         const record = photos.get(message.photoId)
         if (record) {
@@ -930,6 +1226,10 @@ io.on('connection', (socket) => {
     const conversation = conversations.get(conversationId)
     if (!conversation || !conversation.participants.includes(me.id)) {
       callback?.({ error: 'Conversation not found' })
+      return
+    }
+    if (conversation.kind === 'group') {
+      callback?.({ error: 'Calls are only for direct chats' })
       return
     }
     const callMode = mode === 'video' ? 'video' : 'audio'

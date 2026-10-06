@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createSocket, type AppSocket } from './socket'
 import type { CallMode, ConversationSummary, Message, MessageStatus, User } from './types'
+import { isGroup } from './types'
 import { JoinScreen } from './components/JoinScreen'
 import { ChatShell } from './components/ChatShell'
 import { CallOverlay } from './components/CallOverlay'
 import { useCall } from './useCall'
 import { useIdleSignOut } from './useIdleSignOut'
 import { playMessageNote, unlockSounds } from './sounds'
+import { useViewportHeight } from './useViewportHeight'
 import './App.css'
 
 function upsertConversation(
@@ -22,16 +24,30 @@ function upsertConversation(
 }
 
 function markExpired(messages: Message[], messageId: string) {
-  return messages.map((message) =>
-    message.id === messageId
-      ? {
-          ...message,
-          expired: true,
-          photoId: undefined,
-          text: 'Photo disappeared',
-        }
-      : message,
-  )
+  return messages.map((message) => {
+    if (message.id !== messageId) return message
+    if (message.type === 'photo') {
+      return {
+        ...message,
+        expired: true,
+        photoId: undefined,
+        text: 'Photo disappeared',
+      }
+    }
+    if (message.type === 'sticker') {
+      return {
+        ...message,
+        expired: true,
+        sticker: undefined,
+        text: 'Sticker disappeared',
+      }
+    }
+    return {
+      ...message,
+      expired: true,
+      text: 'Message disappeared',
+    }
+  })
 }
 
 function applyStatusUpdates(
@@ -59,6 +75,7 @@ function readFileAsDataUrl(file: File) {
 }
 
 export default function App() {
+  useViewportHeight()
   const socketRef = useRef<AppSocket | null>(null)
   const meRef = useRef<User | null>(null)
   const [me, setMe] = useState<User | null>(null)
@@ -350,6 +367,44 @@ export default function App() {
     })
   }
 
+  function createGroup(name: string) {
+    const socket = socketRef.current
+    if (!socket) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError('Enter a group name to create.')
+      return
+    }
+    setError(null)
+    socket.emit('group:create', { name: trimmed }, (res) => {
+      if (res.error) {
+        setError(res.error)
+        return
+      }
+      setConversations((prev) => upsertConversation(prev, res.conversation))
+      openConversation(res.conversation.id)
+    })
+  }
+
+  function joinGroup(name: string) {
+    const socket = socketRef.current
+    if (!socket) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError('Enter the exact group name to join.')
+      return
+    }
+    setError(null)
+    socket.emit('group:join', { name: trimmed }, (res) => {
+      if (res.error) {
+        setError(res.error)
+        return
+      }
+      setConversations((prev) => upsertConversation(prev, res.conversation))
+      openConversation(res.conversation.id)
+    })
+  }
+
   function openConversation(conversationId: string) {
     const socket = socketRef.current
     if (!socket) return
@@ -441,9 +496,11 @@ export default function App() {
     const socket = socketRef.current
     if (!socket) return
     const conv = conversations.find((c) => c.id === conversationId)
-    const otherName = conv?.other.name
+    const group = isGroup(conv)
     const confirmed = window.confirm(
-      'Delete this conversation for both people? Messages will be gone. You can search their name again to start a new chat.',
+      group
+        ? 'Leave this group? You can join again later with the exact group name.'
+        : 'Delete this conversation for both people? Messages will be gone. You can search their name again to start a new chat.',
     )
     if (!confirmed) return
     socket.emit('conversation:delete', { conversationId }, (res) => {
@@ -451,12 +508,11 @@ export default function App() {
         setError(res.error)
         return
       }
-      // Old messages stay gone; look the person up again so a fresh chat can start.
-      if (otherName) {
+      if (!group && conv?.other.name) {
         setSearchHint(
-          `Chat with ${otherName} deleted. Tap Message to start a new conversation.`,
+          `Chat with ${conv.other.name} deleted. Tap Message to start a new conversation.`,
         )
-        searchUsers(otherName)
+        searchUsers(conv.other.name)
       }
     })
   }
@@ -475,7 +531,7 @@ export default function App() {
   const active = conversations.find((c) => c.id === activeId) ?? null
 
   function startVoiceOrVideo(mode: CallMode) {
-    if (!active) return
+    if (!active || isGroup(active)) return
     setError(null)
     void call.startCall(active.id, mode, active.other)
   }
@@ -495,6 +551,8 @@ export default function App() {
         searchHint={searchHint}
         onSearch={searchUsers}
         onStartChat={startChat}
+        onCreateGroup={createGroup}
+        onJoinGroup={joinGroup}
         onOpenConversation={openConversation}
         onCloseConversation={closeConversation}
         onSendMessage={sendMessage}

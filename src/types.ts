@@ -17,6 +17,7 @@ export type Message = {
   id: string
   conversationId: string
   senderId: string
+  senderName?: string
   text: string
   createdAt: number
   type?: 'text' | 'photo' | 'sticker'
@@ -33,6 +34,9 @@ export type Message = {
 
 export type ConversationSummary = {
   id: string
+  kind?: 'dm' | 'group'
+  name?: string
+  memberCount?: number
   other: User
   otherOnline: boolean
   createdAt: number
@@ -60,3 +64,12 @@ export const STICKERS = [
   '❤️', '🔥', '⭐', '✨', '🎉', '💯', '✅', '🚀',
   '🐱', '🐶', '🐼', '🦊', '🐸', '🦄', '🐝', '🌸',
 ] as const
+
+export function isGroup(conversation: ConversationSummary | null | undefined) {
+  return conversation?.kind === 'group'
+}
+
+export function conversationTitle(conversation: ConversationSummary) {
+  if (isGroup(conversation)) return conversation.name || 'Group'
+  return conversation.other.name
+}

@@ -28,6 +28,13 @@
   --shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
   --font-display: 'Segoe UI', 'Helvetica Neue', sans-serif;
   --font-body: 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --app-height: 100vh;
+  --app-height: 100dvh;
+  --vv-offset-top: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
   color: var(--ink);
   font-family: var(--font-body);
   font-synthesis: none;
@@ -45,7 +52,11 @@ html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -261,11 +272,18 @@ button {
 
 .join {
   position: relative;
-  min-height: 100vh;
+  min-height: var(--app-height, 100dvh);
+  height: var(--app-height, 100dvh);
   display: grid;
   place-items: center;
-  overflow: hidden;
-  padding: 2rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding:
+    max(1.25rem, var(--safe-top))
+    max(1.25rem, var(--safe-right))
+    max(1.25rem, var(--safe-bottom))
+    max(1.25rem, var(--safe-left));
 }
 
 .join__glow {
@@ -569,11 +587,15 @@ button {
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(280px, 380px) 1fr;
-  min-height: 100vh;
-  min-height: 100dvh;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  width: 100%;
+  height: var(--app-height, 100dvh);
+  max-height: var(--app-height, 100dvh);
+  overflow: hidden;
   background: var(--bg);
   animation: rise-in 0.45s ease both;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 .screen-guard-on .messages,
@@ -644,9 +666,10 @@ button {
 }
 
 .sidebar__brand {
-  padding: 0.85rem 1rem 0.65rem;
+  padding: max(0.65rem, var(--safe-top)) 1rem 0.65rem;
   background: var(--wa-header);
   border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
 .sidebar__brand-row {
@@ -691,6 +714,57 @@ button {
   font-size: 0.8rem;
   color: var(--muted);
   line-height: 1.35;
+}
+
+.group-form {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.group-form__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.group-form__btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  background: var(--sky);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.group-form__btn--join {
+  background: #2a3942;
+  color: #e9edef;
+}
+
+.group-form__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.threads__avatar.is-group,
+.stage__avatar.is-group {
+  background: linear-gradient(145deg, #00a884, #005c4b);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.bubble__sender {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--sky-hot);
+}
+
+.bubble__text--gone {
+  font-style: italic;
+  opacity: 0.72;
 }
 
 .inbox {
@@ -912,25 +986,28 @@ button {
 }
 
 .stage {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: 100vh;
-  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   background: #0b141a;
 }
 
 .stage__empty {
-  grid-row: 1 / -1;
+  flex: 1;
   display: grid;
   align-content: center;
   justify-items: center;
   text-align: center;
   gap: 0.85rem;
-  padding: 2.5rem;
+  padding: max(2rem, var(--safe-top)) 1.5rem max(2rem, var(--safe-bottom));
   max-width: 34rem;
+  width: 100%;
   margin: 0 auto;
   color: var(--muted);
+  overflow: auto;
 }
 
 .stage__empty h1,
@@ -951,10 +1028,12 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.55rem 0.85rem;
+  gap: 0.55rem;
+  padding: max(0.45rem, var(--safe-top)) 0.75rem 0.55rem;
   border-bottom: 1px solid var(--line);
   background: var(--wa-header);
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .stage__identity {
@@ -1003,15 +1082,6 @@ button {
   font-weight: 500;
 }
 
-.stage__delete {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.4rem 0.8rem;
-  font-size: 0.8rem;
-}
-
 .stage__delete:hover {
   color: #fda4af;
   border-color: rgba(244, 63, 94, 0.45);
@@ -1019,11 +1089,14 @@ button {
 }
 
 .messages {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  overflow: auto;
-  padding: 0.85rem 0.85rem 1.25rem;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.85rem 0.85rem 1.35rem;
   background-color: #0b141a;
   background-image:
     radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px),
@@ -1212,7 +1285,8 @@ button {
 .msg-actions .react-picker {
   position: static;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 0.15rem;
   padding: 0.4rem 0.45rem;
   border-radius: 999px;
@@ -1272,12 +1346,14 @@ button {
 
 .reply-bar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.65rem;
   align-items: center;
   padding: 0.55rem 0.85rem 0.15rem;
   background: var(--wa-composer);
   border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .reply-bar__body {
@@ -1519,12 +1595,14 @@ button {
 
 .composer {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
-  gap: 0.5rem;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 0.4rem;
   align-items: center;
-  padding: 0.55rem 0.75rem 0.7rem;
+  padding: 0.5rem 0.65rem calc(0.55rem + var(--safe-bottom));
   border-top: 1px solid var(--line);
   background: var(--wa-composer);
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .composer__file {
@@ -1540,11 +1618,16 @@ button {
 .composer__sticker {
   border: 0;
   border-radius: 50%;
-  width: 2.55rem;
-  height: 2.55rem;
+  width: 2.4rem;
+  height: 2.4rem;
   padding: 0;
   background: transparent;
   color: #8696a0;
+  font-size: 1.15rem;
+  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
   transition: color 160ms ease, background 160ms ease;
 }
 
@@ -1574,8 +1657,11 @@ button {
   border-top: 1px solid var(--line);
   background: rgba(2, 6, 23, 0.92);
   backdrop-filter: blur(12px);
-  padding: 0.85rem 1.25rem 1rem;
+  padding: 0.75rem 1rem 0.85rem;
   animation: rise-in 0.22s ease both;
+  flex-shrink: 0;
+  max-height: min(40vh, 240px);
+  overflow: hidden;
 }
 
 .sticker-panel__head {
@@ -1605,8 +1691,9 @@ button {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 0.35rem;
-  max-height: 180px;
+  max-height: min(180px, 32vh);
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .sticker-panel__item {
@@ -1663,27 +1750,68 @@ button {
   }
 }
 
-@media (max-width: 860px) {
-  .sticker-panel__grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .composer {
-    grid-template-columns: auto auto 1fr auto;
-  }
+.stage__error {
+  margin: 0;
+  padding: 0.45rem 0.85rem;
+  flex-shrink: 0;
+  font-size: 0.85rem;
 }
 
-.stage__error {
-  padding: 0 1.5rem;
+.stage__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.stage__call,
+.stage__delete {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  color: var(--sky-hot);
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 2.2rem;
+}
+
+.stage__delete {
+  color: #f87171;
+}
+
+.stage__call:hover {
+  background: var(--riv-soft);
+}
+
+.stage__action-icon {
+  display: none;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.stage__action-label {
+  display: inline;
+}
+
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
-    height: 100vh;
-    height: 100dvh;
+    height: var(--app-height, 100dvh);
+    max-height: var(--app-height, 100dvh);
     overflow: hidden;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .sidebar {
@@ -1691,12 +1819,16 @@ button {
     height: 100%;
     min-height: 0;
     max-height: none;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
 
   .stage {
     display: none;
     height: 100%;
     min-height: 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
 
   .shell--chat-open .sidebar {
@@ -1704,7 +1836,7 @@ button {
   }
 
   .shell--chat-open .stage {
-    display: grid;
+    display: flex;
   }
 
   .stage__back {
@@ -1713,16 +1845,38 @@ button {
 
   .stage__header {
     flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+
+  .stage__call,
+  .stage__delete {
+    padding: 0;
+    width: 2.35rem;
+    height: 2.35rem;
+    min-height: 2.35rem;
+    border-radius: 50%;
+  }
+
+  .stage__action-icon {
+    display: inline;
+  }
+
+  .stage__action-label {
+    display: none;
   }
 
   .threads__item,
   .people__item {
-    min-height: 4.75rem;
-    padding: 0.8rem 1rem;
+    min-height: 4.5rem;
+    padding: 0.75rem 0.9rem;
   }
 
   .install {
-    display: none;
+    position: sticky;
+    bottom: 0;
+    margin: 0.75rem 0 0;
+    width: 100%;
+    max-width: none;
   }
 
   .bubble-wrap {
@@ -1738,6 +1892,7 @@ button {
     left: 0;
     right: auto;
     transform: none;
+    max-width: min(96vw, 20rem);
   }
 
   .msg-actions--mine {
@@ -1746,29 +1901,44 @@ button {
   }
 
   .messages {
-    padding-left: 0.65rem;
-    padding-right: 0.65rem;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
+
+  .composer__input {
+    font-size: 16px; /* prevents iOS zoom on focus */
+  }
+
+  .sticker-panel__grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    max-height: min(28vh, 160px);
   }
 }
 
-.stage__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
+@media (max-width: 380px) {
+  .stage__avatar {
+    width: 2.35rem;
+    height: 2.35rem;
+    font-size: 0.75rem;
+  }
 
-.stage__call {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.4rem 0.75rem;
-  background: transparent;
-  color: var(--sky-hot);
-  font-size: 0.8rem;
-}
+  .composer {
+    gap: 0.25rem;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+  }
 
-.stage__call:hover {
-  background: var(--riv-soft);
+  .composer__photo,
+  .composer__sticker {
+    width: 2.15rem;
+    height: 2.15rem;
+  }
+
+  .call-btn {
+    min-width: 3.75rem;
+    padding: 0.7rem 0.85rem;
+    font-size: 0.85rem;
+  }
 }
 
 .call-overlay__audio {
@@ -1787,6 +1957,7 @@ button {
   grid-template-rows: 1fr auto;
   background: #0b141a;
   color: #e9edef;
+  padding-top: var(--safe-top);
 }
 
 .call-overlay__stage {
@@ -1811,14 +1982,15 @@ button {
 
 .call-overlay__local {
   position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  width: min(28vw, 160px);
+  right: max(0.75rem, var(--safe-right));
+  bottom: max(5.75rem, calc(4.5rem + var(--safe-bottom)));
+  width: min(28vw, 140px);
   aspect-ratio: 3 / 4;
   object-fit: cover;
   border-radius: 12px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: #202c33;
+  z-index: 3;
 }
 
 .call-overlay__local--off {
@@ -1849,9 +2021,9 @@ button {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 5.5rem;
+  bottom: max(5.75rem, calc(4.75rem + var(--safe-bottom)));
   text-align: center;
-  padding: 0 1rem;
+  padding: 0 max(1rem, var(--safe-left)) 0 max(1rem, var(--safe-right));
   z-index: 2;
 }
 
@@ -1897,17 +2069,19 @@ button {
 
 .call-overlay__controls {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 1rem;
-  padding: 1.25rem 1rem 2rem;
+  gap: 0.75rem;
+  padding: 1rem max(0.75rem, var(--safe-left)) calc(1.15rem + var(--safe-bottom)) max(0.75rem, var(--safe-right));
   background: rgba(0, 0, 0, 0.35);
+  z-index: 4;
 }
 
 .call-btn {
   border: 0;
   border-radius: 999px;
-  min-width: 4.5rem;
-  padding: 0.85rem 1.1rem;
+  min-width: 4.25rem;
+  padding: 0.8rem 1rem;
   font-weight: 600;
   color: #fff;
 }

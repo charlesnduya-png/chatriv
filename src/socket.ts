@@ -30,6 +30,14 @@ export type ClientToServer = {
     payload: { otherUserId: string },
     callback: (res: Ack<{ conversation: ConversationSummary }>) => void,
   ) => void
+  'group:create': (
+    payload: { name: string },
+    callback: (res: Ack<{ conversation: ConversationSummary }>) => void,
+  ) => void
+  'group:join': (
+    payload: { name: string },
+    callback: (res: Ack<{ conversation: ConversationSummary }>) => void,
+  ) => void
   'conversation:open': (
     payload: { conversationId: string },
     callback: (res: Ack<{ conversation: ConversationSummary; messages: Message[] }>) => void,

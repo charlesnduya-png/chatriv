@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type TouchEvent as ReactTouchEvent } from 'react'
 import type { ConversationSummary, Message, User } from '../types'
-import { REACTION_EMOJIS, STICKERS } from '../types'
+import {
+  REACTION_EMOJIS,
+  STICKERS,
+  conversationTitle,
+  isGroup,
+} from '../types'
 import { apiUrl } from '../api'
 import { Logo } from './Logo'
 import { InstallPrompt } from './InstallPrompt'
@@ -19,6 +24,8 @@ type ChatShellProps = {
   searchHint: string | null
   onSearch: (name: string) => void
   onStartChat: (otherUserId: string) => void
+  onCreateGroup: (name: string) => void
+  onJoinGroup: (name: string) => void
   onOpenConversation: (conversationId: string) => void
   onCloseConversation: () => void
   onSendMessage: (text: string, replyToMessageId?: string) => void
@@ -97,7 +104,11 @@ function initials(name: string) {
 
 function previewText(conversation: ConversationSummary, meId: string) {
   const last = conversation.lastMessage
-  if (!last) return 'Say hello'
+  if (!last) {
+    return isGroup(conversation)
+      ? 'Group chat · messages vanish in 5 min'
+      : 'Say hello'
+  }
   const mine = last.senderId === meId
   const prefix = mine ? 'You: ' : ''
   const text = last.text.replace(/\s+/g, ' ').trim()
@@ -179,6 +190,7 @@ function MessageBubble({
   meId,
   clustered,
   showMeta,
+  showSender,
   onReact,
   onReply,
   onJumpToReply,
@@ -188,6 +200,7 @@ function MessageBubble({
   meId: string
   clustered: boolean
   showMeta: boolean
+  showSender: boolean
   onReact: (messageId: string, emoji: string) => void
   onReply: (message: Message) => void
   onJumpToReply: (messageId: string) => void
@@ -343,6 +356,10 @@ function MessageBubble({
           openReactPicker()
         }}
       >
+        {showSender && !mine && !clustered ? (
+          <p className="bubble__sender">{message.senderName || 'Someone'}</p>
+        ) : null}
+
         {message.replyTo ? (
           <button
             type="button"
@@ -357,7 +374,9 @@ function MessageBubble({
           </button>
         ) : null}
 
-        {message.type === 'photo' ? (
+        {message.expired && message.type !== 'photo' ? (
+          <p className="bubble__text bubble__text--gone">{message.text}</p>
+        ) : message.type === 'photo' ? (
           <PhotoMessage message={message} mine={mine} />
         ) : message.type === 'sticker' ? (
           <p className="bubble__sticker" aria-label="Sticker">
@@ -496,6 +515,8 @@ export function ChatShell({
   searchHint,
   onSearch,
   onStartChat,
+  onCreateGroup,
+  onJoinGroup,
   onOpenConversation,
   onCloseConversation,
   onSendMessage,
@@ -509,8 +530,10 @@ export function ChatShell({
 }: ChatShellProps) {
   const [draft, setDraft] = useState('')
   const [nameDraft, setNameDraft] = useState(searchQuery)
+  const [groupDraft, setGroupDraft] = useState('')
   const [stickerOpen, setStickerOpen] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const activeIsGroup = isGroup(active)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const composerInputRef = useRef<HTMLInputElement>(null)
@@ -585,7 +608,7 @@ export function ChatShell({
               className="search__input"
               value={nameDraft}
               onChange={(event) => setNameDraft(event.target.value)}
-              placeholder="Search"
+              placeholder="Search people"
               maxLength={32}
               autoComplete="off"
             />
@@ -594,6 +617,49 @@ export function ChatShell({
             </button>
           </form>
           {searchHint ? <p className="sidebar__hint">{searchHint}</p> : null}
+
+          <form
+            className="group-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+            }}
+          >
+            <input
+              className="search__input"
+              value={groupDraft}
+              onChange={(event) => setGroupDraft(event.target.value)}
+              placeholder="Group name"
+              maxLength={32}
+              autoComplete="off"
+            />
+            <div className="group-form__actions">
+              <button
+                type="button"
+                className="group-form__btn"
+                disabled={!groupDraft.trim()}
+                onClick={() => {
+                  onCreateGroup(groupDraft)
+                  setGroupDraft('')
+                }}
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                className="group-form__btn group-form__btn--join"
+                disabled={!groupDraft.trim()}
+                onClick={() => {
+                  onJoinGroup(groupDraft)
+                  setGroupDraft('')
+                }}
+              >
+                Join
+              </button>
+            </div>
+          </form>
+          <p className="sidebar__hint">
+            Groups: join with the exact name. Chats disappear after 5 minutes.
+          </p>
         </div>
 
         <div className="inbox" role="list">
@@ -629,12 +695,15 @@ export function ChatShell({
             <h2 className="inbox__heading">Messages</h2>
             {conversations.length === 0 ? (
               <p className="sidebar__empty">
-                No chats yet. Search a name to message someone. Demo: <strong>dolly</strong>.
+                No chats yet. Search a person or create/join a group. Demo DM:{' '}
+                <strong>dolly</strong>.
               </p>
             ) : (
               <ul className="threads">
                 {conversations.map((conversation) => {
                   const isActive = conversation.id === active?.id
+                  const group = isGroup(conversation)
+                  const title = conversationTitle(conversation)
                   const stamp =
                     conversation.lastMessage?.createdAt ?? conversation.createdAt
                   return (
@@ -645,14 +714,14 @@ export function ChatShell({
                         onClick={() => onOpenConversation(conversation.id)}
                       >
                         <span
-                          className={`threads__avatar${conversation.otherOnline ? ' is-online' : ''}`}
+                          className={`threads__avatar${group ? ' is-group' : ''}${!group && conversation.otherOnline ? ' is-online' : ''}`}
                           aria-hidden
                         >
-                          {initials(conversation.other.name)}
+                          {group ? '#' : initials(title)}
                         </span>
                         <span className="threads__body">
                           <span className="threads__top">
-                            <span className="threads__name">{conversation.other.name}</span>
+                            <span className="threads__name">{title}</span>
                             <time
                               className="threads__time"
                               dateTime={new Date(stamp).toISOString()}
@@ -661,7 +730,9 @@ export function ChatShell({
                             </time>
                           </span>
                           <span className="threads__preview">
-                            {previewText(conversation, me.id)}
+                            {group
+                              ? `${conversation.memberCount || 1} members · ${previewText(conversation, me.id)}`
+                              : previewText(conversation, me.id)}
                           </span>
                         </span>
                       </button>
@@ -678,10 +749,10 @@ export function ChatShell({
         {!active ? (
           <div className="stage__empty">
             <Logo size="lg" />
-            <h1>Find a contact to begin.</h1>
+            <h1>Find a contact or group.</h1>
             <p>
-              Search an exact display name to open a conversation. Chats are
-              protected from casual screenshots and copy; photos are view-only.
+              Search a display name for a private chat, or create/join a group by
+              exact name. Group messages disappear after 5 minutes.
             </p>
           </div>
         ) : (
@@ -697,45 +768,66 @@ export function ChatShell({
                   ←
                 </button>
                 <span
-                  className={`stage__avatar${active.otherOnline ? ' is-online' : ''}`}
+                  className={`stage__avatar${activeIsGroup ? ' is-group' : ''}${!activeIsGroup && active.otherOnline ? ' is-online' : ''}`}
                   aria-hidden
                 >
-                  {initials(active.other.name)}
+                  {activeIsGroup ? '#' : initials(conversationTitle(active))}
                 </span>
                 <div className="stage__titles">
-                  <h1 className="stage__title">{active.other.name}</h1>
-                  <p className={`stage__subtitle${active.otherOnline ? ' is-online' : ''}`}>
-                    {active.otherOnline ? 'online' : 'offline'}
+                  <h1 className="stage__title">{conversationTitle(active)}</h1>
+                  <p
+                    className={`stage__subtitle${!activeIsGroup && active.otherOnline ? ' is-online' : ''}`}
+                  >
+                    {activeIsGroup
+                      ? `${active.memberCount || 1} members · vanish in 5 min`
+                      : active.otherOnline
+                        ? 'online'
+                        : 'offline'}
                   </p>
                 </div>
               </div>
               <div className="stage__actions">
-                <button
-                  type="button"
-                  className="stage__call"
-                  onClick={onVoiceCall}
-                  aria-label="Voice call"
-                  title="Voice call"
-                >
-                  Call
-                </button>
-                <button
-                  type="button"
-                  className="stage__call"
-                  onClick={onVideoCall}
-                  aria-label="Video call"
-                  title="Video call"
-                >
-                  Video
-                </button>
+                {!activeIsGroup ? (
+                  <>
+                    <button
+                      type="button"
+                      className="stage__call"
+                      onClick={onVoiceCall}
+                      aria-label="Voice call"
+                      title="Voice call"
+                    >
+                      <span className="stage__action-icon" aria-hidden>
+                        📞
+                      </span>
+                      <span className="stage__action-label">Call</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="stage__call"
+                      onClick={onVideoCall}
+                      aria-label="Video call"
+                      title="Video call"
+                    >
+                      <span className="stage__action-icon" aria-hidden>
+                        🎥
+                      </span>
+                      <span className="stage__action-label">Video</span>
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   className="stage__delete"
                   onClick={() => onDeleteConversation(active.id)}
-                  aria-label="Delete conversation"
-                  title="Delete conversation"
+                  aria-label={activeIsGroup ? 'Leave group' : 'Delete conversation'}
+                  title={activeIsGroup ? 'Leave group' : 'Delete conversation'}
                 >
-                  Delete
+                  <span className="stage__action-icon" aria-hidden>
+                    {activeIsGroup ? '⎋' : '🗑'}
+                  </span>
+                  <span className="stage__action-label">
+                    {activeIsGroup ? 'Leave' : 'Delete'}
+                  </span>
                 </button>
               </div>
             </header>
@@ -775,6 +867,7 @@ export function ChatShell({
                         meId={me.id}
                         clustered={clustered}
                         showMeta={showMeta}
+                        showSender={activeIsGroup}
                         onReact={onReact}
                         onReply={beginReply}
                         onJumpToReply={jumpToReply}
@@ -870,8 +963,10 @@ export function ChatShell({
                 className="composer__photo"
                 disabled={sendingPhoto}
                 onClick={() => fileRef.current?.click()}
+                aria-label={sendingPhoto ? 'Sending photo' : 'Send photo'}
+                title={sendingPhoto ? 'Sending…' : 'Photo'}
               >
-                {sendingPhoto ? 'Sending…' : 'Photo'}
+                {sendingPhoto ? '…' : '📷'}
               </button>
               <button
                 type="button"
@@ -887,7 +982,11 @@ export function ChatShell({
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder={
-                  replyTo ? 'Type a reply…' : `Message ${active.other.name}`
+                  replyTo
+                    ? 'Type a reply…'
+                    : activeIsGroup
+                      ? `Message ${conversationTitle(active)}`
+                      : `Message ${active.other.name}`
                 }
                 maxLength={2000}
                 autoFocus
