@@ -20,9 +20,9 @@ type ChatShellProps = {
   onStartChat: (otherUserId: string) => void
   onOpenConversation: (conversationId: string) => void
   onCloseConversation: () => void
-  onSendMessage: (text: string) => void
-  onSendPhoto: (file: File) => void
-  onSendSticker: (sticker: string) => void
+  onSendMessage: (text: string, replyToMessageId?: string) => void
+  onSendPhoto: (file: File, replyToMessageId?: string) => void
+  onSendSticker: (sticker: string, replyToMessageId?: string) => void
   onReact: (messageId: string, emoji: string) => void
   onDeleteConversation: (conversationId: string) => void
   onSignOut: () => void
@@ -160,6 +160,12 @@ function groupReactions(reactions: Record<string, string> = {}) {
   return [...counts.values()]
 }
 
+function replyLabel(message: Message, meId: string) {
+  if (!message.replyTo) return null
+  const mine = message.replyTo.senderId === meId
+  return mine ? 'You' : message.replyTo.senderName
+}
+
 function MessageBubble({
   message,
   mine,
@@ -167,6 +173,8 @@ function MessageBubble({
   clustered,
   showMeta,
   onReact,
+  onReply,
+  onJumpToReply,
 }: {
   message: Message
   mine: boolean
@@ -174,6 +182,8 @@ function MessageBubble({
   clustered: boolean
   showMeta: boolean
   onReact: (messageId: string, emoji: string) => void
+  onReply: (message: Message) => void
+  onJumpToReply: (messageId: string) => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const lastTap = useRef(0)
@@ -182,6 +192,7 @@ function MessageBubble({
     ...group,
     mine: myReaction === group.emoji,
   }))
+  const quotedFrom = replyLabel(message, meId)
 
   function handleDoubleTap() {
     const now = Date.now()
@@ -194,6 +205,7 @@ function MessageBubble({
 
   return (
     <div
+      id={`msg-${message.id}`}
       className={`bubble-wrap${mine ? ' bubble-wrap--mine' : ''}${clustered ? ' bubble-wrap--cluster' : ''}${reactionGroups.length ? ' has-reactions' : ''}`}
     >
       <article
@@ -204,6 +216,20 @@ function MessageBubble({
           setPickerOpen((open) => !open)
         }}
       >
+        {message.replyTo ? (
+          <button
+            type="button"
+            className="bubble__quote"
+            onClick={(event) => {
+              event.stopPropagation()
+              onJumpToReply(message.replyTo!.id)
+            }}
+          >
+            <span className="bubble__quote-name">{quotedFrom}</span>
+            <span className="bubble__quote-text">{message.replyTo.text}</span>
+          </button>
+        ) : null}
+
         {message.type === 'photo' ? (
           <PhotoMessage message={message} mine={mine} />
         ) : message.type === 'sticker' ? (
@@ -223,21 +249,38 @@ function MessageBubble({
         ) : null}
 
         {pickerOpen ? (
-          <div className={`react-picker${mine ? ' react-picker--mine' : ''}`} role="toolbar" aria-label="React">
-            {REACTION_EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className={`react-picker__btn${myReaction === emoji ? ' is-active' : ''}`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onReact(message.id, emoji)
-                  setPickerOpen(false)
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
+          <div
+            className={`msg-actions${mine ? ' msg-actions--mine' : ''}`}
+            role="toolbar"
+            aria-label="Message actions"
+          >
+            <div className="react-picker" role="group" aria-label="React">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className={`react-picker__btn${myReaction === emoji ? ' is-active' : ''}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onReact(message.id, emoji)
+                    setPickerOpen(false)
+                  }}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="msg-actions__reply"
+              onClick={(event) => {
+                event.stopPropagation()
+                onReply(message)
+                setPickerOpen(false)
+              }}
+            >
+              Reply
+            </button>
           </div>
         ) : null}
       </article>
@@ -259,14 +302,26 @@ function MessageBubble({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        className="react-open"
-        aria-label="Add reaction"
-        onClick={() => setPickerOpen((open) => !open)}
-      >
-        +
-      </button>
+      <div className={`bubble-tools${mine ? ' bubble-tools--mine' : ''}`}>
+        <button
+          type="button"
+          className="react-open"
+          aria-label="Reply"
+          title="Reply"
+          onClick={() => onReply(message)}
+        >
+          ↩
+        </button>
+        <button
+          type="button"
+          className="react-open"
+          aria-label="Add reaction"
+          title="React"
+          onClick={() => setPickerOpen((open) => !open)}
+        >
+          +
+        </button>
+      </div>
     </div>
   )
 }
@@ -365,8 +420,10 @@ export function ChatShell({
   const [draft, setDraft] = useState('')
   const [nameDraft, setNameDraft] = useState(searchQuery)
   const [stickerOpen, setStickerOpen] = useState(false)
+  const [replyTo, setReplyTo] = useState<Message | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const composerInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -375,11 +432,31 @@ export function ChatShell({
   useEffect(() => {
     setDraft('')
     setStickerOpen(false)
+    setReplyTo(null)
   }, [active?.id])
 
   useEffect(() => {
     setNameDraft(searchQuery)
   }, [searchQuery])
+
+  function beginReply(message: Message) {
+    setReplyTo(message)
+    window.setTimeout(() => composerInputRef.current?.focus(), 0)
+  }
+
+  function jumpToReply(messageId: string) {
+    const node = document.getElementById(`msg-${messageId}`)
+    if (!node) return
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    node.classList.add('is-flash')
+    window.setTimeout(() => node.classList.remove('is-flash'), 1200)
+  }
+
+  function consumeReplyId() {
+    const id = replyTo?.id
+    setReplyTo(null)
+    return id
+  }
 
   return (
     <div className={`shell${active ? ' shell--chat-open' : ''}`}>
@@ -602,6 +679,8 @@ export function ChatShell({
                         clustered={clustered}
                         showMeta={showMeta}
                         onReact={onReact}
+                        onReply={beginReply}
+                        onJumpToReply={jumpToReply}
                       />
                     </div>
                   )
@@ -631,7 +710,7 @@ export function ChatShell({
                       type="button"
                       className="sticker-panel__item"
                       onClick={() => {
-                        onSendSticker(sticker)
+                        onSendSticker(sticker, consumeReplyId())
                         setStickerOpen(false)
                       }}
                     >
@@ -642,13 +721,39 @@ export function ChatShell({
               </div>
             ) : null}
 
+            {replyTo ? (
+              <div className="reply-bar">
+                <div className="reply-bar__body">
+                  <p className="reply-bar__label">
+                    Replying to{' '}
+                    {replyTo.senderId === me.id ? 'yourself' : active.other.name}
+                  </p>
+                  <p className="reply-bar__text">
+                    {replyTo.type === 'sticker'
+                      ? replyTo.sticker || 'Sticker'
+                      : replyTo.type === 'photo'
+                        ? 'Photo'
+                        : replyTo.text}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="reply-bar__close"
+                  onClick={() => setReplyTo(null)}
+                  aria-label="Cancel reply"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+
             <form
               className="composer"
               onSubmit={(event) => {
                 event.preventDefault()
                 const text = draft.trim()
                 if (!text) return
-                onSendMessage(text)
+                onSendMessage(text, consumeReplyId())
                 setDraft('')
               }}
             >
@@ -660,7 +765,7 @@ export function ChatShell({
                 onChange={(event) => {
                   const file = event.target.files?.[0]
                   event.target.value = ''
-                  if (file) onSendPhoto(file)
+                  if (file) onSendPhoto(file, consumeReplyId())
                 }}
               />
               <button
@@ -680,10 +785,13 @@ export function ChatShell({
                 😊
               </button>
               <input
+                ref={composerInputRef}
                 className="composer__input"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder={`Message ${active.other.name}`}
+                placeholder={
+                  replyTo ? 'Type a reply…' : `Message ${active.other.name}`
+                }
                 maxLength={2000}
                 autoFocus
               />

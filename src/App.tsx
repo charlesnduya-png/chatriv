@@ -330,20 +330,24 @@ export default function App() {
     setError(null)
   }
 
-  function sendMessage(text: string) {
+  function sendMessage(text: string, replyToMessageId?: string) {
     const socket = socketRef.current
     if (!socket || !activeId) return
-    socket.emit('message:send', { conversationId: activeId, text }, (res) => {
-      if (res.error) setError(res.error)
-    })
+    socket.emit(
+      'message:send',
+      { conversationId: activeId, text, replyToMessageId },
+      (res) => {
+        if (res.error) setError(res.error)
+      },
+    )
   }
 
-  function sendSticker(sticker: string) {
+  function sendSticker(sticker: string, replyToMessageId?: string) {
     const socket = socketRef.current
     if (!socket || !activeId) return
     socket.emit(
       'message:sticker',
-      { conversationId: activeId, sticker },
+      { conversationId: activeId, sticker, replyToMessageId },
       (res) => {
         if (res.error) setError(res.error)
       },
@@ -362,7 +366,7 @@ export default function App() {
     )
   }
 
-  async function sendPhoto(file: File) {
+  async function sendPhoto(file: File, replyToMessageId?: string) {
     const socket = socketRef.current
     if (!socket || !activeId) return
 
@@ -377,6 +381,7 @@ export default function App() {
           data,
           mime: file.type,
           fileName: file.name,
+          replyToMessageId,
         },
         (res) => {
           setSendingPhoto(false)

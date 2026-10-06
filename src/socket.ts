@@ -30,7 +30,11 @@ export type ClientToServer = {
   ) => void
   'conversation:blur': () => void
   'message:send': (
-    payload: { conversationId: string; text: string },
+    payload: {
+      conversationId: string
+      text: string
+      replyToMessageId?: string
+    },
     callback: (res: Ack<{ message: Message }>) => void,
   ) => void
   'message:photo': (
@@ -39,11 +43,16 @@ export type ClientToServer = {
       data: string
       mime: string
       fileName: string
+      replyToMessageId?: string
     },
     callback: (res: Ack<{ message: Message }>) => void,
   ) => void
   'message:sticker': (
-    payload: { conversationId: string; sticker: string },
+    payload: {
+      conversationId: string
+      sticker: string
+      replyToMessageId?: string
+    },
     callback: (res: Ack<{ message: Message }>) => void,
   ) => void
   'conversation:delete': (

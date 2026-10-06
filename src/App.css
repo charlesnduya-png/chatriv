@@ -1014,10 +1014,14 @@ button {
   margin-bottom: 0.55rem;
 }
 
-.bubble-wrap:hover .react-open,
-.bubble-wrap:focus-within .react-open {
+.bubble-wrap:hover .bubble-tools,
+.bubble-wrap:focus-within .bubble-tools {
   opacity: 1;
-  transform: scale(1);
+  pointer-events: auto;
+}
+
+.bubble-wrap.is-flash .bubble {
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.55);
 }
 
 .bubble {
@@ -1064,32 +1068,53 @@ button {
   background: var(--wa-out);
 }
 
-.react-open {
+.bubble-tools {
   position: absolute;
   top: 50%;
-  right: -2.1rem;
-  transform: translateY(-50%) scale(0.9);
+  right: -4.4rem;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.bubble-tools--mine {
+  right: auto;
+  left: -4.4rem;
+  flex-direction: row-reverse;
+}
+
+.react-open {
   width: 1.7rem;
   height: 1.7rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(32, 44, 51, 0.95);
   color: #e2e8f0;
   font-size: 0.85rem;
   line-height: 1;
-  opacity: 0;
-  transition: opacity 160ms ease, transform 160ms ease;
+  padding: 0;
 }
 
-.bubble-wrap--mine .react-open {
-  right: auto;
-  left: -2.1rem;
-}
-
-.react-picker {
+.msg-actions {
   position: absolute;
   left: 0;
   bottom: calc(100% + 0.45rem);
+  display: grid;
+  gap: 0.35rem;
+  z-index: 4;
+  animation: rise-in 0.18s ease both;
+}
+
+.msg-actions--mine {
+  left: auto;
+  right: 0;
+}
+
+.msg-actions .react-picker {
+  position: static;
   display: flex;
   gap: 0.2rem;
   padding: 0.35rem;
@@ -1097,13 +1122,97 @@ button {
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid var(--line);
   box-shadow: 0 14px 30px rgba(2, 6, 23, 0.45);
-  animation: rise-in 0.18s ease both;
-  z-index: 3;
 }
 
-.react-picker--mine {
-  left: auto;
-  right: 0;
+.msg-actions__reply {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  background: rgba(15, 23, 42, 0.96);
+  color: #e9edef;
+  font-size: 0.82rem;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.4);
+}
+
+.bubble__quote {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-left: 3px solid var(--sky-hot);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bubble--mine .bubble__quote {
+  border-left-color: rgba(233, 237, 239, 0.75);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.bubble__quote-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--sky-hot);
+}
+
+.bubble--mine .bubble__quote-name {
+  color: #d1f4de;
+}
+
+.bubble__quote-text {
+  font-size: 0.8rem;
+  color: rgba(233, 237, 239, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-bar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.85rem 0.15rem;
+  background: var(--wa-composer);
+  border-top: 1px solid var(--line);
+}
+
+.reply-bar__body {
+  min-width: 0;
+  padding: 0.4rem 0.65rem;
+  border-left: 3px solid var(--sky-hot);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.reply-bar__label {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--sky-hot);
+}
+
+.reply-bar__text {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-bar__close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  padding: 0.35rem;
 }
 
 .react-picker__btn {
@@ -1503,6 +1612,28 @@ button {
 
   .install {
     display: none;
+  }
+
+  .bubble-tools {
+    opacity: 1;
+    pointer-events: auto;
+    right: -0.15rem;
+    top: -0.15rem;
+    transform: none;
+  }
+
+  .bubble-tools--mine {
+    left: auto;
+    right: -0.15rem;
+    flex-direction: row;
+  }
+
+  .bubble-wrap {
+    margin-right: 0.15rem;
+  }
+
+  .bubble-wrap--mine {
+    margin-left: 0.15rem;
   }
 }
 

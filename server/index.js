@@ -41,7 +41,14 @@ const ALLOWED_STICKERS = new Set([
  *  expiresAt?: number,
  *  expired?: boolean,
  *  status?: 'sent' | 'delivered' | 'read',
- *  reactions?: Record<string, string>
+ *  reactions?: Record<string, string>,
+ *  replyTo?: {
+ *    id: string,
+ *    senderId: string,
+ *    senderName: string,
+ *    text: string,
+ *    type?: 'text' | 'photo' | 'sticker'
+ *  }
  * }} Message */
 /** @typedef {{ id: string, participants: [string, string], names: Record<string, string>, createdAt: number }} Conversation */
 /** @typedef {{ buffer: Buffer, mime: string, fileName: string, conversationId: string, expiresAt: number, timer: NodeJS.Timeout }} PhotoRecord */
@@ -124,6 +131,32 @@ function publicUser(user) {
   return { id: user.id, name: user.name }
 }
 
+function replyPreviewText(message) {
+  if (!message) return ''
+  if (message.type === 'photo') {
+    return message.expired ? 'Photo disappeared' : 'Photo'
+  }
+  if (message.type === 'sticker') return message.sticker || 'Sticker'
+  return String(message.text || '').slice(0, 140)
+}
+
+function buildReplyTo(conversation, replyToMessageId) {
+  if (!replyToMessageId) return undefined
+  const list = messagesByConversation.get(conversation.id) || []
+  const target = list.find((item) => item.id === replyToMessageId)
+  if (!target) return undefined
+  const sender =
+    usersById.get(target.senderId) ||
+    ({ name: conversation.names?.[target.senderId] || 'Someone' })
+  return {
+    id: target.id,
+    senderId: target.senderId,
+    senderName: sender.name || 'Someone',
+    text: replyPreviewText(target),
+    type: target.type || 'text',
+  }
+}
+
 function publicMessage(message) {
   const status = message.status || 'sent'
   const reactions = message.reactions || {}
@@ -134,6 +167,7 @@ function publicMessage(message) {
     createdAt: message.createdAt,
     status,
     reactions,
+    replyTo: message.replyTo || undefined,
   }
 
   if (message.type === 'sticker') {
@@ -555,7 +589,7 @@ io.on('connection', (socket) => {
     viewingConversation.set(me.id, null)
   })
 
-  socket.on('message:send', ({ conversationId, text }, callback) => {
+  socket.on('message:send', ({ conversationId, text, replyToMessageId }, callback) => {
     const me = usersBySocket.get(socket.id)
     const conversation = conversations.get(conversationId)
     const trimmed = String(text || '').trim().slice(0, 2000)
@@ -578,6 +612,7 @@ io.on('connection', (socket) => {
       type: 'text',
       status: 'sent',
       reactions: {},
+      replyTo: buildReplyTo(conversation, replyToMessageId),
     }
 
     publishMessage(conversation, message)
@@ -585,7 +620,7 @@ io.on('connection', (socket) => {
     maybeDemoReply(conversation, me, trimmed)
   })
 
-  socket.on('message:sticker', ({ conversationId, sticker }, callback) => {
+  socket.on('message:sticker', ({ conversationId, sticker, replyToMessageId }, callback) => {
     const me = usersBySocket.get(socket.id)
     const conversation = conversations.get(conversationId)
     const pick = String(sticker || '')
@@ -609,6 +644,7 @@ io.on('connection', (socket) => {
       type: 'sticker',
       status: 'sent',
       reactions: {},
+      replyTo: buildReplyTo(conversation, replyToMessageId),
     }
 
     publishMessage(conversation, message)
@@ -683,7 +719,7 @@ io.on('connection', (socket) => {
 
   socket.on(
     'message:photo',
-    ({ conversationId, data, mime, fileName }, callback) => {
+    ({ conversationId, data, mime, fileName, replyToMessageId }, callback) => {
       const me = usersBySocket.get(socket.id)
       const conversation = conversations.get(conversationId)
 
@@ -752,6 +788,7 @@ io.on('connection', (socket) => {
         expired: false,
         status: 'sent',
         reactions: {},
+        replyTo: buildReplyTo(conversation, replyToMessageId),
       }
 
       publishMessage(conversation, message)
