@@ -1,134 +1,68 @@
-import { randomBytes, randomUUID } from 'crypto'
-import { SignJWT, importJWK, importPKCS8 } from 'jose'
+import { generateJwt } from '@coinbase/cdp-sdk/auth'
+import { randomUUID } from 'crypto'
 
-const CHECKOUT_HOST = 'business.coinbase.com'
-const CHECKOUT_PATH = '/api/v1/checkouts'
+const BUSINESS_HOST = 'business.coinbase.com'
+const CHECKOUTS_PATH = '/api/v1/checkouts'
 
 function getCdpCredentials() {
   const apiKeyId = String(
-    process.env.COINBASE_CDP_API_KEY_ID || process.env.CDP_API_KEY_ID || '',
+    process.env.COINBASE_CDP_API_KEY_ID || process.env.KEY_ID || '',
   ).trim()
   const apiKeySecret = String(
-    process.env.COINBASE_CDP_API_KEY_SECRET ||
-      process.env.CDP_API_KEY_SECRET ||
-      '',
+    process.env.COINBASE_CDP_API_KEY_SECRET || process.env.KEY_SECRET || '',
   ).trim()
   return { apiKeyId, apiKeySecret }
 }
 
-function isEd25519Secret(secret) {
-  try {
-    return Buffer.from(secret, 'base64').length === 64
-  } catch {
-    return false
-  }
-}
-
-async function buildEdwardsJwt(apiKeyId, apiKeySecret, uri) {
-  const decoded = Buffer.from(apiKeySecret, 'base64')
-  if (decoded.length !== 64) {
-    throw new Error('Invalid Ed25519 key length')
-  }
-
-  const seed = decoded.subarray(0, 32)
-  const publicKey = decoded.subarray(32)
-  const key = await importJWK(
-    {
-      kty: 'OKP',
-      crv: 'Ed25519',
-      d: seed.toString('base64url'),
-      x: publicKey.toString('base64url'),
-    },
-    'EdDSA',
-  )
-
-  const now = Math.floor(Date.now() / 1000)
-  return new SignJWT({
-    sub: apiKeyId,
-    iss: 'cdp',
-    aud: ['cdp_service'],
-    uri,
-  })
-    .setProtectedHeader({
-      alg: 'EdDSA',
-      typ: 'JWT',
-      kid: apiKeyId,
-      nonce: randomBytes(16).toString('hex'),
-    })
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(now + 120)
-    .sign(key)
-}
-
-async function buildEcJwt(apiKeyId, apiKeySecret, uri) {
-  const pem = apiKeySecret.includes('\\n')
-    ? apiKeySecret.replace(/\\n/g, '\n')
-    : apiKeySecret
-  const key = await importPKCS8(pem, 'ES256')
-  const now = Math.floor(Date.now() / 1000)
-  return new SignJWT({
-    sub: apiKeyId,
-    iss: 'cdp',
-    aud: ['cdp_service'],
-    uri,
-  })
-    .setProtectedHeader({
-      alg: 'ES256',
-      typ: 'JWT',
-      kid: apiKeyId,
-      nonce: randomBytes(16).toString('hex'),
-    })
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(now + 120)
-    .sign(key)
-}
-
-export async function generateCdpJwt({ method, host, path }) {
-  const { apiKeyId, apiKeySecret } = getCdpCredentials()
-  if (!apiKeyId || !apiKeySecret) {
-    throw new Error('Coinbase CDP API key is not configured')
-  }
-
-  const uri = `${method.toUpperCase()} ${host}${path}`
-  if (isEd25519Secret(apiKeySecret)) {
-    return buildEdwardsJwt(apiKeyId, apiKeySecret, uri)
-  }
-  return buildEcJwt(apiKeyId, apiKeySecret, uri)
-}
-
-export function hasCdpCredentials() {
+export function isCoinbaseConfigured() {
   const { apiKeyId, apiKeySecret } = getCdpCredentials()
   return Boolean(apiKeyId && apiKeySecret)
 }
 
-export async function createBusinessCheckout({
-  amount,
-  currency = 'USD',
-  description,
-  metadata = {},
-}) {
-  const jwt = await generateCdpJwt({
-    method: 'POST',
-    host: CHECKOUT_HOST,
-    path: CHECKOUT_PATH,
-  })
+async function createBusinessJwt() {
+  const { apiKeyId, apiKeySecret } = getCdpCredentials()
+  if (!apiKeyId || !apiKeySecret) {
+    throw new Error('Coinbase CDP API key is not configured.')
+  }
 
-  const response = await fetch(`https://${CHECKOUT_HOST}${CHECKOUT_PATH}`, {
+  return generateJwt({
+    apiKeyId,
+    apiKeySecret,
+    requestMethod: 'POST',
+    requestHost: BUSINESS_HOST,
+    requestPath: CHECKOUTS_PATH,
+    expiresIn: 120,
+  })
+}
+
+/**
+ * Create a Coinbase Business Checkout payment link.
+ * @param {{ amount: string, fromName: string, note?: string, conversationId?: string }} input
+ */
+export async function createCryptoCheckout(input) {
+  const token = await createBusinessJwt()
+  const description =
+    input.note?.trim() ||
+    `Chatriv crypto payment from ${input.fromName || 'a user'}`
+
+  const response = await fetch(`https://${BUSINESS_HOST}${CHECKOUTS_PATH}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${jwt}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'X-Idempotency-Key': randomUUID(),
     },
     body: JSON.stringify({
-      amount,
-      currency,
-      description,
-      metadata,
+      amount: input.amount,
+      currency: 'USD',
+      description: description.slice(0, 500),
       successRedirectUrl: 'https://chatriv.com/',
       failRedirectUrl: 'https://chatriv.com/',
+      metadata: {
+        source: 'chatriv-chicken',
+        fromName: String(input.fromName || 'Chatriv').slice(0, 100),
+        conversationId: String(input.conversationId || '').slice(0, 100),
+      },
     }),
   })
 
@@ -137,7 +71,7 @@ export async function createBusinessCheckout({
   try {
     payload = JSON.parse(raw)
   } catch {
-    payload = { raw }
+    payload = {}
   }
 
   if (!response.ok) {
@@ -148,13 +82,24 @@ export async function createBusinessCheckout({
       `Coinbase Checkout error (${response.status})`
     if (response.status === 403) {
       message =
-        'Coinbase blocked checkout creation for this API key. In Coinbase Developer Platform, recreate the Secret API Key with View (+ Receive if shown) for Coinbase Business Checkouts, and make sure Checkouts/payments are enabled on the Business account.'
+        'Coinbase rejected this key for Business Checkouts. In Coinbase Developer Platform, enable Coinbase Business / Checkout permissions for this Secret API key (or create the key under a Coinbase Business account).'
     }
-    const err = new Error(String(message))
-    err.status = response.status
-    err.payload = payload
-    throw err
+    const error = new Error(String(message))
+    error.status = response.status
+    error.payload = payload
+    throw error
   }
 
-  return payload
+  const hostedUrl = payload?.url
+  if (!hostedUrl) {
+    throw new Error('Coinbase did not return a payment link.')
+  }
+
+  return {
+    hostedUrl,
+    code: payload?.id || null,
+    amount: payload?.fiatAmount || payload?.amount || input.amount,
+    currency: payload?.fiatCurrency || payload?.currency || 'USD',
+    expiresAt: payload?.expiresAt || null,
+  }
 }
