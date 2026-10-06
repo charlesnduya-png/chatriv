@@ -445,6 +445,7 @@ export default function App() {
 
   function startVoiceOrVideo(mode: CallMode) {
     if (!active) return
+    setError(null)
     void call.startCall(active.id, mode, active.other)
   }
 
@@ -483,11 +484,19 @@ export default function App() {
           cameraOff={call.cameraOff}
           localStream={call.localStream}
           remoteStream={call.remoteStream}
-          onAccept={() => void call.acceptCall()}
+          error={error}
+          onAccept={() => {
+            setError(null)
+            void call.acceptCall()
+          }}
           onReject={call.rejectCall}
-          onHangUp={call.hangUp}
+          onHangUp={() => {
+            setError(null)
+            call.hangUp()
+          }}
           onToggleMute={call.toggleMute}
           onToggleCamera={call.toggleCamera}
+          onDismissError={() => setError(null)}
         />
       ) : null}
     </>

@@ -9,11 +9,13 @@ type CallOverlayProps = {
   cameraOff: boolean
   localStream: MediaStream | null
   remoteStream: MediaStream | null
+  error?: string | null
   onAccept: () => void
   onReject: () => void
   onHangUp: () => void
   onToggleMute: () => void
   onToggleCamera: () => void
+  onDismissError?: () => void
 }
 
 function formatDuration(seconds: number) {
@@ -41,7 +43,7 @@ async function playMedia(
   try {
     await element.play()
   } catch {
-    // Autoplay may block until a tap; Accept/Call already counts as gesture.
+    // Autoplay may wait for a gesture; Call/Accept already provides one.
   }
 }
 
@@ -53,11 +55,13 @@ export function CallOverlay({
   cameraOff,
   localStream,
   remoteStream,
+  error,
   onAccept,
   onReject,
   onHangUp,
   onToggleMute,
   onToggleCamera,
+  onDismissError,
 }: CallOverlayProps) {
   const localRef = useRef<HTMLVideoElement>(null)
   const remoteRef = useRef<HTMLVideoElement>(null)
@@ -94,23 +98,30 @@ export function CallOverlay({
           ? 'Video call'
           : 'Voice call'
 
-  const showVideoStage = mode === 'video' && (phase === 'connected' || phase === 'outgoing')
+  const showVideo = mode === 'video'
+  const showRemoteVideo = Boolean(remoteStream?.getVideoTracks().length)
 
   return (
     <div className={`call-overlay call-overlay--${mode}${phase === 'connected' ? ' is-live' : ''}`}>
-      {/* Always mounted so remote audio can play for voice and video calls. */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="call-overlay__audio" />
 
       <div className="call-overlay__stage">
-        {showVideoStage ? (
+        {showVideo ? (
           <>
             <video
               ref={remoteRef}
-              className="call-overlay__remote"
+              className={`call-overlay__remote${showRemoteVideo ? ' is-on' : ''}`}
               autoPlay
               playsInline
               muted
             />
+            {!showRemoteVideo ? (
+              <div className="call-overlay__avatar-panel call-overlay__avatar-panel--overlay">
+                <span className="call-overlay__avatar" aria-hidden>
+                  {initials(peer.name)}
+                </span>
+              </div>
+            ) : null}
             {!cameraOff && localStream ? (
               <video
                 ref={localRef}
@@ -141,6 +152,16 @@ export function CallOverlay({
           {phase === 'incoming' ? (
             <p className="call-overlay__kind">
               Incoming {mode === 'video' ? 'video' : 'voice'} call
+            </p>
+          ) : null}
+          {error ? (
+            <p className="call-overlay__error" role="alert">
+              {error}
+              {onDismissError ? (
+                <button type="button" className="call-overlay__error-dismiss" onClick={onDismissError}>
+                  Dismiss
+                </button>
+              ) : null}
             </p>
           ) : null}
         </div>

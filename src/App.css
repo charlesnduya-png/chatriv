@@ -1727,7 +1727,49 @@ button {
 }
 
 .call-overlay__meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 5.5rem;
   text-align: center;
+  padding: 0 1rem;
+  z-index: 2;
+}
+
+.call-overlay__remote {
+  opacity: 0.35;
+}
+
+.call-overlay__remote.is-on {
+  opacity: 1;
+}
+
+.call-overlay__avatar-panel--overlay {
+  position: absolute;
+  inset: 0;
+  place-content: center;
+}
+
+.call-overlay__error {
+  margin: 0.65rem auto 0;
+  max-width: 22rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.85);
+  color: #fecaca;
+  font-size: 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+}
+
+.call-overlay__error-dismiss {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  padding: 0;
 }
 
 .call-overlay__name {

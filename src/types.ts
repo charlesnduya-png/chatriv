@@ -46,9 +46,9 @@ export type ConversationSummary = {
 export type CallMode = 'audio' | 'video'
 
 export type CallSignal =
-  | { type: 'offer'; sdp: RTCSessionDescriptionInit }
-  | { type: 'answer'; sdp: RTCSessionDescriptionInit }
-  | { type: 'ice'; candidate: RTCIceCandidateInit | null }
+  | { type: 'offer'; sdp: string }
+  | { type: 'answer'; sdp: string }
+  | { type: 'ice'; candidate: RTCIceCandidateInit }
 
 export const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'] as const
 

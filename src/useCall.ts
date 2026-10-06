@@ -5,19 +5,12 @@ import type { CallMode, CallSignal, User } from './types'
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // Public TURN so mobile carriers / strict NATs can still exchange media.
   {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
@@ -43,6 +36,91 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop())
 }
 
+function friendlyMediaError(err: unknown, mode: CallMode) {
+  const name = err instanceof DOMException ? err.name : ''
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Allow microphone and camera access to continue the call'
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return mode === 'video'
+      ? 'No camera or microphone found on this device'
+      : 'No microphone found on this device'
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Camera or microphone is already in use by another app'
+  }
+  return mode === 'video'
+    ? 'Could not start camera or microphone'
+    : 'Could not start microphone'
+}
+
+function friendlySignalError(err: unknown) {
+  const message = err instanceof Error ? err.message : ''
+  if (/setRemoteDescription|wrong state|InvalidStateError/i.test(message)) {
+    return 'Call setup hit a glitch — hang up and try again'
+  }
+  if (/setLocalDescription/i.test(message)) {
+    return 'Could not start the call connection — try again'
+  }
+  return 'Call signaling failed — try again'
+}
+
+async function getCallMedia(mode: CallMode) {
+  if (mode === 'audio') {
+    return navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    })
+  }
+
+  const attempts: MediaStreamConstraints[] = [
+    {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: { facingMode: 'user' },
+    },
+    { audio: true, video: true },
+    { audio: true, video: { width: 640, height: 480 } },
+  ]
+
+  let lastError: unknown
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('getUserMedia failed')
+}
+
+function sdpFromDescription(desc: RTCSessionDescription | RTCSessionDescriptionInit | null) {
+  if (!desc?.sdp || !desc.type) return null
+  if (desc.type !== 'offer' && desc.type !== 'answer') return null
+  return { type: desc.type as 'offer' | 'answer', sdp: desc.sdp }
+}
+
+/** Accept plain SDP string or legacy nested { type, sdp } payloads. */
+function normalizeSdp(value: unknown) {
+  if (typeof value === 'string' && value.includes('v=0')) return value
+  if (
+    value &&
+    typeof value === 'object' &&
+    'sdp' in value &&
+    typeof (value as { sdp: unknown }).sdp === 'string'
+  ) {
+    return (value as { sdp: string }).sdp
+  }
+  return null
+}
+
 export function useCall({ socket, onError }: UseCallOptions) {
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
@@ -57,6 +135,8 @@ export function useCall({ socket, onError }: UseCallOptions) {
   const signalingCallIdRef = useRef<string | null>(null)
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([])
   const remoteReadyRef = useRef(false)
+  const makingOfferRef = useRef(false)
+  const ignoreOfferRef = useRef(false)
 
   useEffect(() => {
     callRef.current = activeCall
@@ -78,6 +158,8 @@ export function useCall({ socket, onError }: UseCallOptions) {
     signalingCallIdRef.current = null
     pendingIceRef.current = []
     remoteReadyRef.current = false
+    makingOfferRef.current = false
+    ignoreOfferRef.current = false
     setMuted(false)
     setCameraOff(false)
   }, [])
@@ -90,15 +172,14 @@ export function useCall({ socket, onError }: UseCallOptions) {
   const sendSignal = useCallback(
     (callId: string, signal: CallSignal) => {
       socket?.emit('call:signal', { callId, signal }, (res) => {
-        if (res.error) onError(res.error)
+        if (res?.error) onError(res.error)
       })
     },
     [socket, onError],
   )
 
   const flushIce = useCallback(async (pc: RTCPeerConnection) => {
-    const queued = pendingIceRef.current
-    pendingIceRef.current = []
+    const queued = pendingIceRef.current.splice(0, pendingIceRef.current.length)
     for (const candidate of queued) {
       try {
         await pc.addIceCandidate(candidate)
@@ -113,17 +194,19 @@ export function useCall({ socket, onError }: UseCallOptions) {
       if (callId) signalingCallIdRef.current = callId
       if (pcRef.current) return pcRef.current
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+      const pc = new RTCPeerConnection({
+        iceServers: ICE_SERVERS,
+        iceCandidatePoolSize: 4,
+      })
       pcRef.current = pc
 
       pc.onicecandidate = (event) => {
         const activeId = signalingCallIdRef.current
-        if (event.candidate && activeId && !activeId.startsWith('pending-')) {
-          sendSignal(activeId, {
-            type: 'ice',
-            candidate: event.candidate.toJSON(),
-          })
-        }
+        if (!activeId || !event.candidate) return
+        sendSignal(activeId, {
+          type: 'ice',
+          candidate: event.candidate.toJSON(),
+        })
       }
 
       pc.ontrack = (event) => {
@@ -135,20 +218,16 @@ export function useCall({ socket, onError }: UseCallOptions) {
         if (!stream.getTracks().some((track) => track.id === event.track.id)) {
           stream.addTrack(event.track)
         }
-        // New MediaStream instance so React rebinds <audio>/<video>.
         setRemoteStream(new MediaStream(stream.getTracks()))
       }
 
       pc.onconnectionstatechange = () => {
-        const state = pc.connectionState
-        if (state === 'failed') {
-          const current = callRef.current
-          if (current) {
-            socket?.emit('call:end', { callId: current.callId }, () => {})
-            onError('Call connection failed — try again on the same Wi‑Fi if possible')
-            resetCall()
-          }
-        }
+        if (pc.connectionState !== 'failed') return
+        const current = callRef.current
+        if (!current) return
+        socket?.emit('call:end', { callId: current.callId }, () => {})
+        onError('Video/call connection failed — try again on the same network')
+        resetCall()
       }
 
       return pc
@@ -160,35 +239,23 @@ export function useCall({ socket, onError }: UseCallOptions) {
     async (mode: CallMode, callId?: string) => {
       if (callId) signalingCallIdRef.current = callId
       if (localStreamRef.current) {
+        const pc = ensurePeerConnection(callId)
+        const senders = pc.getSenders()
+        for (const track of localStreamRef.current.getTracks()) {
+          if (!senders.some((sender) => sender.track?.id === track.id)) {
+            pc.addTrack(track, localStreamRef.current)
+          }
+        }
         return localStreamRef.current
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video:
-          mode === 'video'
-            ? {
-                facingMode: 'user',
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : false,
-      })
-
+      const stream = await getCallMedia(mode)
       localStreamRef.current = stream
       setLocalStream(stream)
 
       const pc = ensurePeerConnection(callId)
-      const senders = pc.getSenders()
       for (const track of stream.getTracks()) {
-        const already = senders.some((sender) => sender.track?.id === track.id)
-        if (!already) {
-          pc.addTrack(track, stream)
-        }
+        pc.addTrack(track, stream)
       }
       return stream
     },
@@ -199,9 +266,18 @@ export function useCall({ socket, onError }: UseCallOptions) {
     async (callId: string) => {
       signalingCallIdRef.current = callId
       const pc = ensurePeerConnection(callId)
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      sendSignal(callId, { type: 'offer', sdp: pc.localDescription || offer })
+      if (makingOfferRef.current || pc.signalingState !== 'stable') return
+
+      makingOfferRef.current = true
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        const local = sdpFromDescription(pc.localDescription)
+        if (!local) throw new Error('Missing local offer')
+        sendSignal(callId, { type: 'offer', sdp: local.sdp })
+      } finally {
+        makingOfferRef.current = false
+      }
     },
     [ensurePeerConnection, sendSignal],
   )
@@ -215,23 +291,38 @@ export function useCall({ socket, onError }: UseCallOptions) {
 
       try {
         if (signal.type === 'offer') {
+          const polite = !current.isCaller
+          const offerCollision =
+            makingOfferRef.current || pc.signalingState !== 'stable'
+          ignoreOfferRef.current = !polite && offerCollision
+          if (ignoreOfferRef.current) return
+
+          const offerSdp = normalizeSdp(signal.sdp)
+          if (!offerSdp) throw new Error('Invalid offer')
+
           signalingCallIdRef.current = callId
           if (!localStreamRef.current) {
             await attachLocalMedia(current.mode, callId)
           }
-          await pc.setRemoteDescription(signal.sdp)
+
+          await pc.setRemoteDescription({ type: 'offer', sdp: offerSdp })
           remoteReadyRef.current = true
           await flushIce(pc)
+
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
-          sendSignal(callId, { type: 'answer', sdp: pc.localDescription || answer })
+          const local = sdpFromDescription(pc.localDescription)
+          if (!local) throw new Error('Missing local answer')
+          sendSignal(callId, { type: 'answer', sdp: local.sdp })
         } else if (signal.type === 'answer') {
-          if (pc.signalingState === 'have-local-offer') {
-            await pc.setRemoteDescription(signal.sdp)
-            remoteReadyRef.current = true
-            await flushIce(pc)
-          }
-        } else if (signal.type === 'ice' && signal.candidate) {
+          if (pc.signalingState !== 'have-local-offer') return
+          const answerSdp = normalizeSdp(signal.sdp)
+          if (!answerSdp) throw new Error('Invalid answer')
+          await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+          remoteReadyRef.current = true
+          await flushIce(pc)
+        } else if (signal.type === 'ice') {
+          if (!signal.candidate?.candidate) return
           if (!remoteReadyRef.current || !pc.remoteDescription) {
             pendingIceRef.current.push(signal.candidate)
           } else {
@@ -243,7 +334,7 @@ export function useCall({ socket, onError }: UseCallOptions) {
           }
         }
       } catch (err) {
-        onError(err instanceof Error ? err.message : 'Call signaling failed')
+        onError(friendlySignalError(err))
       }
     },
     [ensurePeerConnection, attachLocalMedia, flushIce, sendSignal, onError],
@@ -290,10 +381,10 @@ export function useCall({ socket, onError }: UseCallOptions) {
         try {
           await attachLocalMedia(payload.mode, payload.callId)
           await createOffer(payload.callId)
-        } catch {
+        } catch (err) {
           socket.emit('call:end', { callId: payload.callId }, () => {})
           resetCall()
-          onError('Could not access microphone or camera')
+          onError(friendlyMediaError(err, payload.mode))
         }
       })()
     }
@@ -329,12 +420,15 @@ export function useCall({ socket, onError }: UseCallOptions) {
         return
       }
       if (!peer) return
+      if (!navigator.mediaDevices?.getUserMedia) {
+        onError('This browser does not support calls')
+        return
+      }
 
-      // Capture media in the same user gesture as the Call/Video tap.
       try {
         await attachLocalMedia(mode)
-      } catch {
-        onError('Allow microphone/camera access to place a call')
+      } catch (err) {
+        onError(friendlyMediaError(err, mode))
         cleanupMedia()
         return
       }
@@ -364,11 +458,10 @@ export function useCall({ socket, onError }: UseCallOptions) {
     const current = callRef.current
     if (!socket || !current || current.phase !== 'incoming') return
 
-    // getUserMedia must stay inside the Accept tap (mobile browsers).
     try {
       await attachLocalMedia(current.mode, current.callId)
-    } catch {
-      onError('Allow microphone/camera access to answer the call')
+    } catch (err) {
+      onError(friendlyMediaError(err, current.mode))
       return
     }
 
