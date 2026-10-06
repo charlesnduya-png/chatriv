@@ -4,6 +4,7 @@ import { REACTION_EMOJIS, STICKERS } from '../types'
 import { apiUrl } from '../api'
 import { Logo } from './Logo'
 import { InstallPrompt } from './InstallPrompt'
+import { useScreenGuard } from '../useScreenGuard'
 
 type ChatShellProps = {
   me: User
@@ -351,43 +352,26 @@ function PhotoMessage({
     return (
       <div className="photo photo--gone">
         <p className="photo__gone-label">Photo disappeared</p>
-        <p className="photo__gone-copy">The 10-minute save window ended.</p>
+        <p className="photo__gone-copy">This photo is no longer available.</p>
       </div>
     )
   }
 
   const src = apiUrl(`/api/photos/${message.photoId}`)
 
-  async function savePhoto() {
-    try {
-      const response = await fetch(src)
-      if (!response.ok) throw new Error('expired')
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = message.fileName || 'photo.jpg'
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      // Server expiry will refresh the bubble shortly.
-    }
-  }
-
   return (
     <div className="photo">
-      <img className="photo__image" src={src} alt={message.fileName || 'Shared photo'} />
+      <img
+        className="photo__image"
+        src={src}
+        alt={message.fileName || 'Shared photo'}
+        draggable={false}
+      />
       <div className="photo__meta">
-        <span className="photo__timer">Save window {formatRemaining(remaining)}</span>
-        {!mine ? (
-          <button type="button" className="photo__save" onClick={savePhoto}>
-            Save
-          </button>
-        ) : (
-          <span className="photo__hint">Visible for 10 minutes</span>
-        )}
+        <span className="photo__timer">View-only · {formatRemaining(remaining)}</span>
+        <span className="photo__hint">
+          {mine ? 'Protected · expires in 10 min' : 'Protected · cannot save'}
+        </span>
       </div>
     </div>
   )
@@ -424,6 +408,7 @@ export function ChatShell({
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const composerInputRef = useRef<HTMLInputElement>(null)
+  const screenGuard = useScreenGuard(true)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -459,7 +444,13 @@ export function ChatShell({
   }
 
   return (
-    <div className={`shell${active ? ' shell--chat-open' : ''}`}>
+    <div
+      className={`shell${active ? ' shell--chat-open' : ''}${screenGuard.obscured ? ' is-obscured' : ''}${screenGuard.flash ? ' is-capture-flash' : ''}`}
+    >
+      <div className="screen-guard" aria-hidden={!screenGuard.obscured && !screenGuard.flash}>
+        <p className="screen-guard__title">Chatrive</p>
+        <p className="screen-guard__copy">Chat content is hidden for privacy.</p>
+      </div>
       <aside className="sidebar">
         <header className="sidebar__brand">
           <div className="sidebar__brand-row">
@@ -583,8 +574,8 @@ export function ChatShell({
             <Logo size="lg" />
             <h1>Find a contact to begin.</h1>
             <p>
-              Search an exact display name to open a conversation. Shared photos
-              remain available for ten minutes before they expire.
+              Search an exact display name to open a conversation. Chats are
+              protected from casual screenshots and copy; photos are view-only.
             </p>
           </div>
         ) : (

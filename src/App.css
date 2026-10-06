@@ -552,12 +552,69 @@ button {
 }
 
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(280px, 380px) 1fr;
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--bg);
   animation: rise-in 0.45s ease both;
+}
+
+.screen-guard-on .messages,
+.screen-guard-on .bubble,
+.screen-guard-on .bubble__text,
+.screen-guard-on .photo,
+.screen-guard-on .threads,
+.screen-guard-on .call-overlay {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.screen-guard-on .photo__image {
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.screen-guard {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  place-content: center;
+  gap: 0.45rem;
+  text-align: center;
+  padding: 2rem;
+  background: #0b141a;
+  color: #e9edef;
+}
+
+.shell.is-obscured .screen-guard,
+.shell.is-capture-flash .screen-guard {
+  display: grid;
+}
+
+.shell.is-obscured .sidebar,
+.shell.is-obscured .stage,
+.shell.is-capture-flash .sidebar,
+.shell.is-capture-flash .stage {
+  filter: blur(22px);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.screen-guard__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.screen-guard__copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .sidebar {
