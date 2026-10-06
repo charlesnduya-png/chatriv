@@ -1688,6 +1688,11 @@ button {
   height: 100%;
   object-fit: cover;
   background: #111b21;
+  opacity: 0.35;
+}
+
+.call-overlay__remote.is-on {
+  opacity: 1;
 }
 
 .call-overlay__local {
@@ -1734,14 +1739,6 @@ button {
   text-align: center;
   padding: 0 1rem;
   z-index: 2;
-}
-
-.call-overlay__remote {
-  opacity: 0.35;
-}
-
-.call-overlay__remote.is-on {
-  opacity: 1;
 }
 
 .call-overlay__avatar-panel--overlay {
